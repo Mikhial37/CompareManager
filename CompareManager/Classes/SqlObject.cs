@@ -39,6 +39,16 @@ namespace CompareManager.Classes
         /// <summary>When it last changed: <c>modify_date</c> on a server, the file's last write time in a folder.</summary>
         public DateTime? Modified { get; set; }
 
+        /// <summary>When it was made: <c>create_date</c> on a server, the file's creation time in a folder.</summary>
+        public DateTime? Created { get; set; }
+
+        /// <summary>
+        /// The latest date written in its comments — the Change Control header's date, the
+        /// newest line of the modification history (<see cref="ScriptDates"/>). From the whole
+        /// file for a script; from the stored definition on a server. Null when it gives none.
+        /// </summary>
+        public DateTime? ScriptDate { get; set; }
+
         /// <summary>The file it was read from, or "server · database". For the tooltips, the export and WinMerge.</summary>
         public string Origin { get; set; } = "";
 

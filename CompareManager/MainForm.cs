@@ -33,8 +33,8 @@ namespace CompareManager
         private bool _filling;
 
         // ── Sources ──
-        private readonly SourceCard _leftCard  = new SourceCard("LEFT");
-        private readonly SourceCard _rightCard = new SourceCard("RIGHT");
+        private readonly SourceCard _leftCard  = new SourceCard("LEFT · PRIMARY, EVERY OBJECT");
+        private readonly SourceCard _rightCard = new SourceCard("RIGHT · CHECKED AGAINST THE LEFT");
         private readonly Button     _load      = Ui.Primary("Load objects");
         private readonly Button     _duplicates = Ui.Secondary("Find duplicate scripts");
         private readonly Label      _loadNote  = Ui.Label("", Ui.Body, Ui.Muted);
@@ -50,8 +50,14 @@ namespace CompareManager
         private readonly CheckBox _ignoreWhitespace = Option("Ignore whitespace");
         private readonly CheckBox _ignoreCase       = Option("Ignore case");
         private readonly CheckBox _ignoreComments   = Option("Ignore comments");
-        private readonly CheckBox _compareDates     = Option("Compare change dates");
-        private readonly CheckBox _showIdentical    = Option("Show identical");
+        private readonly CheckBox _compareScriptDates = Option("Script header date");
+        private readonly CheckBox _compareDates     = Option("Last changed");
+        private readonly CheckBox _compareCreated   = Option("Created");
+        private readonly CheckBox _showDifferent    = Option("Different");
+        private readonly CheckBox _showDateDiffers  = Option("Dates differ");
+        private readonly CheckBox _showOnlyLeft     = Option("Only in left");
+        private readonly CheckBox _showOnlyRight    = Option("Only in right");
+        private readonly CheckBox _showIdentical    = Option("Identical");
         private readonly Button   _compare          = Ui.Primary("Compare ticked");
         private readonly ListView _resultList       = NewList(checkBoxes: false);
         private readonly Label    _resultNote       = Ui.Label("Load objects, tick what to compare, then Compare.", Ui.Body, Ui.Muted);
@@ -244,25 +250,41 @@ namespace CompareManager
             title.Padding = new Padding(0, 0, 0, 6);
 
             var options = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 0, 0, 4) };
-            options.Controls.AddRange(new Control[] { _compare, _ignoreWhitespace, _ignoreCase, _ignoreComments, _compareDates, _showIdentical });
+            options.Controls.AddRange(new Control[] { _compare, _ignoreWhitespace, _ignoreCase, _ignoreComments });
             _compare.Margin = new Padding(0, 0, 12, 0);
 
+            Label RowLabel(string text)
+            {
+                var label = Ui.Label(text, Ui.Bold, Ui.Muted);
+                label.AutoSize = false;
+                label.Size     = new Size(84, 22);
+                label.Margin   = new Padding(0, 6, 4, 0);
+                return label;
+            }
+
+            var dates = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 2, 0, 0) };
+            dates.Controls.AddRange(new Control[] { RowLabel("Check dates:"), _compareScriptDates, _compareDates, _compareCreated });
+
+            var show = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 2, 0, 0) };
+            show.Controls.AddRange(new Control[] { RowLabel("Show:"), _showDifferent, _showDateDiffers, _showOnlyRight, _showOnlyLeft, _showIdentical });
+
             var tip = new ToolTip();
-            tip.SetToolTip(_ignoreWhitespace, "Indentation, spacing and blank lines do not count as differences");
-            tip.SetToolTip(_ignoreCase,       "SELECT and select are the same");
-            tip.SetToolTip(_ignoreComments,   "Only the code that runs is compared, not the comments");
-            tip.SetToolTip(_compareDates,     "Also list objects whose text is the same but whose change dates are not");
-            tip.SetToolTip(_showIdentical,    "List the identical objects too, not just count them");
+            tip.SetToolTip(_ignoreWhitespace,   "Indentation, spacing and blank lines do not count as differences");
+            tip.SetToolTip(_ignoreCase,         "SELECT and select are the same");
+            tip.SetToolTip(_ignoreComments,     "Only the code that runs is compared, not the comments");
+            tip.SetToolTip(_compareScriptDates, "The latest date written in each script's comments — the Change Control header, the modification history. Compared to the day.");
+            tip.SetToolTip(_compareDates,       "Last changed: the server's modify_date, or the file's last modified time");
+            tip.SetToolTip(_compareCreated,     "Created: the server's create_date, or the file's created time");
+            tip.SetToolTip(_showDifferent,    "Objects whose code differs between the two sides");
+            tip.SetToolTip(_showDateDiffers,  "Objects with the same code but a different date (of those being checked)");
+            tip.SetToolTip(_showOnlyRight,    "Ticked objects the right side has and the left does not — new ones");
+            tip.SetToolTip(_showOnlyLeft,     "Ticked objects the left side has and the right does not");
+            tip.SetToolTip(_showIdentical,    "Objects that are the same on both sides");
 
             _resultNote.Dock = DockStyle.Top;
             _resultNote.Padding = new Padding(0, 4, 0, 8);
 
-            _resultList.Columns.Add("Status", 150);
-            _resultList.Columns.Add("Object", 260);
-            _resultList.Columns.Add("Type", 120);
-            _resultList.Columns.Add("Left changed", 130);
-            _resultList.Columns.Add("Right changed", 130);
-            _resultList.Columns.Add("Newer", 55);
+            foreach (var column in ResultColumns) _resultList.Columns.Add(column.Title, column.Width);
             _resultList.DoubleClick += (s, e) => ViewDiff();
             _resultList.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) ViewDiff(); };
             _resultList.ColumnClick += (s, e) => SortResults(e.Column);
@@ -277,12 +299,15 @@ namespace CompareManager
             _winMerge.Click += (s, e) => OpenWinMerge();
             _export.Click   += (s, e) => Export();
 
-            foreach (var box in new[] { _ignoreWhitespace, _ignoreCase, _ignoreComments, _compareDates })
+            foreach (var box in new[] { _ignoreWhitespace, _ignoreCase, _ignoreComments, _compareScriptDates, _compareDates, _compareCreated })
                 box.CheckedChanged += async (s, e) => { if (!_filling && _results.Count > 0) await CompareAsync(); };
-            _showIdentical.CheckedChanged += (s, e) => { if (!_filling) FillResults(); };
+            foreach (var box in new[] { _showDifferent, _showDateDiffers, _showOnlyLeft, _showOnlyRight, _showIdentical })
+                box.CheckedChanged += (s, e) => { if (!_filling) { SaveSettings(); FillResults(); } };
 
             pane.Controls.Add(_resultList);
             pane.Controls.Add(_resultNote);
+            pane.Controls.Add(show);
+            pane.Controls.Add(dates);
             pane.Controls.Add(options);
             pane.Controls.Add(title);
             pane.Controls.Add(buttons);
@@ -355,6 +380,12 @@ namespace CompareManager
             _ignoreCase.Checked       = _settings.Options.IgnoreCase;
             _ignoreComments.Checked   = _settings.Options.IgnoreComments;
             _compareDates.Checked     = _settings.Options.CompareDates;
+            _compareCreated.Checked   = _settings.Options.CompareCreated;
+            _compareScriptDates.Checked = _settings.Options.CompareScriptDates;
+            _showDifferent.Checked    = _settings.ShowDifferent;
+            _showDateDiffers.Checked  = _settings.ShowDateDiffers;
+            _showOnlyLeft.Checked     = _settings.ShowOnlyLeft;
+            _showOnlyRight.Checked    = _settings.ShowOnlyRight;
             _showIdentical.Checked    = _settings.ShowIdentical;
             _filling = false;
 
@@ -366,13 +397,19 @@ namespace CompareManager
             IgnoreWhitespace = _ignoreWhitespace.Checked,
             IgnoreCase       = _ignoreCase.Checked,
             IgnoreComments   = _ignoreComments.Checked,
-            CompareDates     = _compareDates.Checked
+            CompareDates       = _compareDates.Checked,
+            CompareCreated     = _compareCreated.Checked,
+            CompareScriptDates = _compareScriptDates.Checked
         };
 
         private void SaveSettings()
         {
             _settings.Options       = ReadOptions();
-            _settings.ShowIdentical = _showIdentical.Checked;
+            _settings.ShowDifferent   = _showDifferent.Checked;
+            _settings.ShowDateDiffers = _showDateDiffers.Checked;
+            _settings.ShowOnlyLeft    = _showOnlyLeft.Checked;
+            _settings.ShowOnlyRight   = _showOnlyRight.Checked;
+            _settings.ShowIdentical   = _showIdentical.Checked;
             _settings.Save();
         }
 
@@ -460,12 +497,10 @@ namespace CompareManager
             _results = new List<CompareResult>();
             _ticked.Clear();
 
-            // A folder against a database is nearly always "are my scripts what the server
-            // has?", so the folder's own objects start ticked; otherwise everything is.
-            Func<CatalogEntry, bool> startTicked =
-                left.Kind == SourceKind.Folder && right.Kind == SourceKind.Database ? e => e.Left != null :
-                right.Kind == SourceKind.Folder && left.Kind == SourceKind.Database ? e => e.Right != null :
-                                                                                       e => true;
+            // The left is the primary set — everything — and the right is what is checked
+            // against it, so the right side's objects start ticked. Comparing all 27,000 of the
+            // left's would only bury the answer under objects the right never had.
+            Func<CatalogEntry, bool> startTicked = rightTask.Result.Count > 0 ? e => e.Right != null : e => true;
             foreach (var entry in _catalog.Where(startTicked)) _ticked.Add(entry.Key);
 
             _loadNote.Text = $"{leftTask.Result.Count:N0} on the left, {rightTask.Result.Count:N0} on the right, " +
@@ -652,8 +687,7 @@ namespace CompareManager
 
         private void FillResults()
         {
-            var shown = _results.Where(r => _showIdentical.Checked || r.Status != CompareStatus.Identical).ToList();
-            shown = Sorted(shown);
+            var shown = Sorted(_results.Where(r => Shows(r.Status)).ToList());
 
             _resultList.BeginUpdate();
             try
@@ -670,26 +704,52 @@ namespace CompareManager
                 _resultNote.Text = _catalog.Count == 0 ? "Load objects, tick what to compare, then Compare." : "Tick what to compare, then Compare.";
             else
             {
-                int Count(CompareStatus s) => _results.Count(r => r.Status == s);
-                _resultNote.Text =
-                    $"{Count(CompareStatus.Different)} different  ·  {Count(CompareStatus.DateDiffers)} change date differs  ·  " +
-                    $"{Count(CompareStatus.OnlyLeft)} only in left  ·  {Count(CompareStatus.OnlyRight)} only in right  ·  " +
-                    $"{Count(CompareStatus.Identical)} identical";
+                // Every kind is counted, shown or not, so a hidden one is never a silent one.
+                string Count(CompareStatus s, string label)
+                {
+                    int n = _results.Count(r => r.Status == s);
+                    return $"{n:N0} {label}" + (n > 0 && !Shows(s) ? " (hidden)" : "");
+                }
+                _resultNote.Text = string.Join("  ·  ",
+                    Count(CompareStatus.Different,   "different"),
+                    Count(CompareStatus.DateDiffers, "dates differ"),
+                    Count(CompareStatus.OnlyRight,   "only in right"),
+                    Count(CompareStatus.OnlyLeft,    "only in left"),
+                    Count(CompareStatus.Identical,   "identical"));
             }
             UpdateResultButtons();
         }
 
+        private bool Shows(CompareStatus status) => status switch
+        {
+            CompareStatus.Different   => _showDifferent.Checked,
+            CompareStatus.DateDiffers => _showDateDiffers.Checked,
+            CompareStatus.OnlyLeft    => _showOnlyLeft.Checked,
+            CompareStatus.OnlyRight   => _showOnlyRight.Checked,
+            _                         => _showIdentical.Checked
+        };
+
+        /// <summary>
+        /// The results' columns, in order: what each shows and what it sorts by. The list,
+        /// the sorting and the CSV export all read this one table.
+        /// </summary>
+        private static readonly (string Title, int Width, Func<CompareResult, string> Text, Func<CompareResult, object> Sort)[] ResultColumns =
+        {
+            ("Status",            260, r => r.StatusLabel,             r => r.Status),
+            ("Object",            240, r => r.Any.DisplayName,         r => r.Any.DisplayName.ToLowerInvariant()),
+            ("Type",              115, r => r.Any.KindLabel,           r => r.Any.KindLabel),
+            ("Left script date",  105, r => Day(r.Left?.ScriptDate),   r => r.Left?.ScriptDate  ?? DateTime.MinValue),
+            ("Right script date", 105, r => Day(r.Right?.ScriptDate),  r => r.Right?.ScriptDate ?? DateTime.MinValue),
+            ("Left changed",      130, r => Stamp(r.Left?.Modified),   r => r.Left?.Modified    ?? DateTime.MinValue),
+            ("Right changed",     130, r => Stamp(r.Right?.Modified),  r => r.Right?.Modified   ?? DateTime.MinValue),
+            ("Left created",      130, r => Stamp(r.Left?.Created),    r => r.Left?.Created     ?? DateTime.MinValue),
+            ("Right created",     130, r => Stamp(r.Right?.Created),   r => r.Right?.Created    ?? DateTime.MinValue),
+            ("Newer",              55, r => r.Newer,                   r => r.Newer)
+        };
+
         private static ListViewItem ResultItem(CompareResult r)
         {
-            var item = new ListViewItem(new[]
-            {
-                r.StatusLabel,
-                r.Any.DisplayName,
-                r.Any.KindLabel,
-                Stamp(r.Left?.Modified),
-                Stamp(r.Right?.Modified),
-                r.Newer
-            })
+            var item = new ListViewItem(ResultColumns.Select(c => c.Text(r)).ToArray())
             { Tag = r, UseItemStyleForSubItems = true };
 
             (item.BackColor, item.ForeColor) = r.Status switch
@@ -705,6 +765,8 @@ namespace CompareManager
 
         private static string Stamp(DateTime? when) => when?.ToString("yyyy-MM-dd HH:mm:ss") ?? "";
 
+        private static string Day(DateTime? when) => when?.ToString("yyyy-MM-dd") ?? "";
+
         private void SortResults(int column)
         {
             _sortAscending = column == _sortColumn ? !_sortAscending : true;
@@ -716,15 +778,7 @@ namespace CompareManager
         {
             if (_sortColumn < 0) return list.OrderBy(r => r.Status).ThenBy(r => r.Any.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
 
-            Func<CompareResult, object> key = _sortColumn switch
-            {
-                0 => r => r.Status,
-                1 => r => r.Any.DisplayName.ToLowerInvariant(),
-                2 => r => r.Any.KindLabel,
-                3 => r => r.Left?.Modified ?? DateTime.MinValue,
-                4 => r => r.Right?.Modified ?? DateTime.MinValue,
-                _ => r => r.Newer
-            };
+            var key    = ResultColumns[Math.Min(_sortColumn, ResultColumns.Length - 1)].Sort;
             var sorted = _sortAscending ? list.OrderBy(key) : list.OrderByDescending(key);
             return sorted.ThenBy(r => r.Any.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
         }
@@ -788,13 +842,11 @@ namespace CompareManager
             static string Cell(string value) => "\"" + (value ?? "").Replace("\"", "\"\"") + "\"";
 
             var csv = new StringBuilder();
-            csv.AppendLine(string.Join(",", new[] { "Status", "Object", "Type", "Left changed", "Right changed", "Newer", "Left", "Right" }.Select(Cell)));
+            csv.AppendLine(string.Join(",", ResultColumns.Select(c => c.Title).Concat(new[] { "Left", "Right" }).Select(Cell)));
             foreach (var r in Sorted(_results))
-                csv.AppendLine(string.Join(",", new[]
-                {
-                    r.StatusLabel, r.Any.DisplayName, r.Any.KindLabel, Stamp(r.Left?.Modified), Stamp(r.Right?.Modified),
-                    r.Newer, r.Left?.Origin, r.Right?.Origin
-                }.Select(Cell)));
+                csv.AppendLine(string.Join(",", ResultColumns.Select(c => c.Text(r))
+                                                             .Concat(new[] { r.Left?.Origin, r.Right?.Origin })
+                                                             .Select(Cell)));
 
             try
             {
@@ -825,26 +877,29 @@ namespace CompareManager
                 Cursor    = Cursors.Hand;
                 Margin    = new Padding(0);
 
-                var caption = Ui.Label(side, Ui.Caption, Ui.Muted);
-                caption.Location = new Point(14, 10);
-                _kind.Location   = new Point(64, 10);
-                _where.Location  = new Point(14, 34);
-                _where.Height    = 24;
+                _caption = Ui.Label(side, Ui.Caption, Ui.Muted);
+                _caption.Location = new Point(14, 10);
+                _kind.Location    = new Point(64, 10);
+                _where.Location   = new Point(14, 34);
+                _where.Height     = 24;
 
                 _change.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 
-                Controls.Add(caption);
+                Controls.Add(_caption);
                 Controls.Add(_kind);
                 Controls.Add(_where);
                 Controls.Add(_change);
 
-                foreach (Control c in new Control[] { this, caption, _kind, _where, _change })
+                foreach (Control c in new Control[] { this, _caption, _kind, _where, _change })
                     c.Click += (s, e) => Choose?.Invoke(this, EventArgs.Empty);
             }
+
+            private readonly Label _caption;
 
             protected override void OnLayout(LayoutEventArgs e)
             {
                 base.OnLayout(e);
+                _kind.Left       = _caption.Right + 12;
                 _change.Location = new Point(Width - _change.Width - 14, (Height - _change.Height) / 2);
                 _where.Width     = Math.Max(50, _change.Left - 14 - 12);
             }

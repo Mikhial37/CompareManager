@@ -72,11 +72,12 @@ namespace CompareManager.Classes
         public static SqlObject Read(string root, string path)
         {
             string text;
-            DateTime modified;
+            DateTime modified, created;
             try
             {
                 text     = File.ReadAllText(path);
                 modified = File.GetLastWriteTime(path);
+                created  = File.GetCreationTime(path);
             }
             catch (IOException)                 { return null; }
             catch (UnauthorizedAccessException) { return null; }
@@ -84,28 +85,30 @@ namespace CompareManager.Classes
             string relative = Path.GetRelativePath(root, path);
             var    found    = ScriptParser.Identify(text);
 
-            return found == null
+            var entry = found == null
                 ? new SqlObject
                 {
-                    Kind         = ObjectKind.Script,
-                    Name         = Path.GetFileName(path),
-                    Definition   = ScriptParser.TrimBlankLines(text),
-                    Modified     = modified,
-                    Origin       = path,
-                    IsFile       = true,
-                    RelativePath = relative
+                    Kind       = ObjectKind.Script,
+                    Name       = Path.GetFileName(path),
+                    Definition = ScriptParser.TrimBlankLines(text)
                 }
                 : new SqlObject
                 {
-                    Schema       = found.Schema,
-                    Name         = found.Name,
-                    Kind         = found.Kind,
-                    Definition   = found.Batch,
-                    Modified     = modified,
-                    Origin       = path,
-                    IsFile       = true,
-                    RelativePath = relative
+                    Schema     = found.Schema,
+                    Name       = found.Name,
+                    Kind       = found.Kind,
+                    Definition = found.Batch
                 };
+
+            entry.Modified     = modified;
+            entry.Created      = created;
+            // The whole file, not just the batch: a Change Control header usually sits in a
+            // batch of its own above the CREATE.
+            entry.ScriptDate   = ScriptDates.Latest(text);
+            entry.Origin       = path;
+            entry.IsFile       = true;
+            entry.RelativePath = relative;
+            return entry;
         }
 
         private static IEnumerable<string> ScriptFiles(string folder)

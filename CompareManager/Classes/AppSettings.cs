@@ -17,8 +17,13 @@ namespace CompareManager.Classes
         public CompareSource  Right   { get; set; } = new CompareSource { Kind = SourceKind.Database };
         public CompareOptions Options { get; set; } = new CompareOptions();
 
-        /// <summary>Whether identical objects are listed in the results, not only counted.</summary>
-        public bool ShowIdentical { get; set; }
+        // Which results are listed. Every kind is still counted above the list; these only
+        // decide what is shown. By default, only what differs or has changed.
+        public bool ShowDifferent   { get; set; } = true;
+        public bool ShowDateDiffers { get; set; } = true;
+        public bool ShowOnlyLeft    { get; set; }
+        public bool ShowOnlyRight   { get; set; }
+        public bool ShowIdentical   { get; set; }
 
         /// <summary>Folders picked lately, newest first — offered by the folder picker.</summary>
         public List<string> RecentFolders { get; set; } = new List<string>();

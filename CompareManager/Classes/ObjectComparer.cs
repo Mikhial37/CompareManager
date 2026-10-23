@@ -18,8 +18,14 @@ namespace CompareManager.Classes
         /// <summary>Comments do not count — only the code that runs.</summary>
         public bool IgnoreComments { get; set; }
 
-        /// <summary>Report objects whose text is the same but whose change dates are not.</summary>
+        /// <summary>Compare the last-changed dates: <c>modify_date</c>, or the file's last write time.</summary>
         public bool CompareDates { get; set; } = true;
+
+        /// <summary>Compare the created dates: <c>create_date</c>, or the file's creation time.</summary>
+        public bool CompareCreated { get; set; } = true;
+
+        /// <summary>Compare the dates written in the scripts' headers (<see cref="ScriptDates"/>), to the day.</summary>
+        public bool CompareScriptDates { get; set; } = true;
     }
 
     public enum CompareStatus
@@ -39,7 +45,21 @@ namespace CompareManager.Classes
         public SqlObject Right { get; set; }
 
         public bool TextDiffers { get; set; }
-        public bool DatesDiffer { get; set; }
+
+        // Which of the three dates differ, of those the options asked about and both sides have.
+        public bool ModifiedDiffers   { get; set; }
+        public bool CreatedDiffers    { get; set; }
+        public bool ScriptDateDiffers { get; set; }
+
+        public bool DatesDiffer => ModifiedDiffers || CreatedDiffers || ScriptDateDiffers;
+
+        /// <summary>"script date, changed" — which dates differ, in the order people trust them.</summary>
+        public string DatesThatDiffer => string.Join(", ", new[]
+        {
+            ScriptDateDiffers ? "script date" : null,
+            ModifiedDiffers   ? "changed"     : null,
+            CreatedDiffers    ? "created"     : null
+        }.Where(s => s != null));
 
         public CompareStatus Status =>
             Left  == null ? CompareStatus.OnlyRight :
@@ -52,20 +72,24 @@ namespace CompareManager.Classes
 
         public string StatusLabel => Status switch
         {
-            CompareStatus.Different   => DatesDiffer ? "Different (dates too)" : "Different",
-            CompareStatus.DateDiffers => "Change date differs",
+            CompareStatus.Different   => DatesDiffer ? $"Different ({DatesThatDiffer} too)" : "Different",
+            CompareStatus.DateDiffers => $"Dates differ: {DatesThatDiffer}",
             CompareStatus.OnlyLeft    => "Only in left",
             CompareStatus.OnlyRight   => "Only in right",
             _                         => "Identical"
         };
 
-        /// <summary>"Left", "Right" or "" — which side changed last, where both have a date and they differ.</summary>
+        /// <summary>
+        /// "Left", "Right" or "" — which side changed last. The script dates decide when they
+        /// differ, since they survive a copy; otherwise the last-changed dates.
+        /// </summary>
         public string Newer
         {
             get
             {
-                if (Left?.Modified == null || Right?.Modified == null || !DatesDiffer) return "";
-                return Left.Modified > Right.Modified ? "Left" : "Right";
+                if (ScriptDateDiffers) return Left.ScriptDate > Right.ScriptDate ? "Left" : "Right";
+                if (ModifiedDiffers)   return Left.Modified   > Right.Modified   ? "Left" : "Right";
+                return "";
             }
         }
     }
@@ -128,9 +152,18 @@ namespace CompareManager.Classes
                                                 Normalize(entry.Right.Definition, options),
                                                 StringComparison.Ordinal);
 
-            result.DatesDiffer = options.CompareDates && DatesDiffer(entry.Left.Modified, entry.Right.Modified);
+            result.ModifiedDiffers   = options.CompareDates       && DatesDiffer(entry.Left.Modified, entry.Right.Modified);
+            result.CreatedDiffers    = options.CompareCreated     && DatesDiffer(entry.Left.Created,  entry.Right.Created);
+            result.ScriptDateDiffers = options.CompareScriptDates && DaysDiffer(entry.Left.ScriptDate, entry.Right.ScriptDate);
             return result;
         }
+
+        /// <summary>
+        /// A different day. A script's header carries a date, not a time. Only when both sides
+        /// have one: a script with no date in it is not "different" from one that has.
+        /// </summary>
+        public static bool DaysDiffer(DateTime? left, DateTime? right) =>
+            left.HasValue && right.HasValue && left.Value.Date != right.Value.Date;
 
         /// <summary>
         /// Different to the second. SQL Server keeps <c>modify_date</c> to a few milliseconds
@@ -146,8 +179,8 @@ namespace CompareManager.Classes
 
         /// <summary>
         /// The form two definitions are compared in. Always: one kind of line ending, no
-        /// trailing spaces, no blank lines at either end, and the header rewritten as
-        /// <c>CREATE &lt;kind&gt; [schema].[name]</c>. Then, as the options say: comments
+        /// trailing spaces, no blank lines at either end, nothing above the CREATE, and the
+        /// header rewritten as <c>CREATE &lt;kind&gt; [schema].[name]</c>. Then, as the options say: comments
         /// blanked, whitespace collapsed (and dropped around brackets, commas and equals
         /// signs), case folded.
         /// </summary>
@@ -177,8 +210,11 @@ namespace CompareManager.Classes
 
         /// <summary>
         /// Rewrites the first CREATE / ALTER / CREATE OR ALTER as CREATE, and the name after
-        /// it as <c>[schema].[name]</c>. A server keeps whichever verb the object was last
-        /// sent with, and a script names it however its author typed it; neither is a change.
+        /// it as <c>[schema].[name]</c>, and drops everything above it. A server keeps whichever
+        /// verb the object was last sent with, and a script names it however its author typed
+        /// it; neither is a change. Nor is the preamble: what sits above the CREATE in its batch
+        /// is a Change Control line or a modification history, which every edit rewrites — left
+        /// in, a script whose code is unchanged would still read as different.
         /// </summary>
         public static string CanonicalHeader(string text)
         {
@@ -193,7 +229,7 @@ namespace CompareManager.Classes
             var result = new StringBuilder(text);
             result.Remove(name.Index, name.Length).Insert(name.Index, $"[{schema}].[{bare}]");
             result.Remove(verb.Index, verb.Length).Insert(verb.Index, "CREATE");
-            return result.ToString();
+            return result.ToString().Substring(verb.Index);
         }
     }
 }

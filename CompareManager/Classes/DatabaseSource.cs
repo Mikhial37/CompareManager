@@ -21,7 +21,7 @@ namespace CompareManager.Classes
     public static class DatabaseSource
     {
         private const string ObjectsSql = @"
-SELECT o.object_id, s.name, o.name, o.type, o.modify_date, m.definition
+SELECT o.object_id, s.name, o.name, o.type, o.modify_date, m.definition, o.create_date
 FROM   sys.objects o
 JOIN   sys.schemas s ON s.schema_id = o.schema_id
 LEFT JOIN sys.sql_modules m ON m.object_id = o.object_id
@@ -55,13 +55,17 @@ ORDER BY c.object_id, c.column_id;";
                     while (reader.Read())
                     {
                         cancel.ThrowIfCancellationRequested();
+                        string definition = reader.IsDBNull(5) ? "" : reader.GetString(5);
                         objects[reader.GetInt32(0)] = new SqlObject
                         {
                             Schema     = reader.GetString(1),
                             Name       = reader.GetString(2),
                             Kind       = KindOf(reader.GetString(3).Trim()),
                             Modified   = reader.GetDateTime(4),
-                            Definition = reader.IsDBNull(5) ? "" : ScriptParser.TrimBlankLines(reader.GetString(5)),
+                            Created    = reader.GetDateTime(6),
+                            Definition = ScriptParser.TrimBlankLines(definition),
+                            // A server keeps the comments sent with the CREATE, header included.
+                            ScriptDate = ScriptDates.Latest(definition),
                             Origin     = origin
                         };
                     }

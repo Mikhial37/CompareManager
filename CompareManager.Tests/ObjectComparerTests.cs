@@ -14,6 +14,28 @@ namespace CompareManager.Tests
             Schema = "dbo", Name = name, Kind = ObjectKind.Procedure, Definition = definition, Modified = modified ?? When
         };
 
+        [Fact]
+        public void Each_date_is_checked_on_its_own_and_the_script_date_decides_which_is_newer()
+        {
+            var left  = Proc("spX", "CREATE PROCEDURE dbo.spX AS SELECT 1", When.AddDays(5));
+            var right = Proc("spX", "CREATE PROCEDURE dbo.spX AS SELECT 1", When);
+            left.ScriptDate  = new DateTime(2026, 2, 17);
+            right.ScriptDate = new DateTime(2026, 10, 6);
+            left.Created     = right.Created = When;
+
+            var result = CompareOne(left, right);
+
+            Assert.Equal(CompareStatus.DateDiffers, result.Status);
+            Assert.Equal("Dates differ: script date, changed", result.StatusLabel);
+            Assert.Equal("Right", result.Newer);
+
+            var onlyScriptDates = CompareOne(left, right, new CompareOptions { CompareDates = false, CompareCreated = false });
+            Assert.Equal("Dates differ: script date", onlyScriptDates.StatusLabel);
+
+            var noDates = CompareOne(left, right, new CompareOptions { CompareDates = false, CompareCreated = false, CompareScriptDates = false });
+            Assert.Equal(CompareStatus.Identical, noDates.Status);
+        }
+
         private static CompareResult CompareOne(SqlObject left, SqlObject right, CompareOptions options = null) =>
             ObjectComparer.Compare(ObjectComparer.Catalog(new[] { left }, new[] { right }), options ?? new CompareOptions()).Single();
 
@@ -24,6 +46,15 @@ namespace CompareManager.Tests
             var server = Proc("spX", "CREATE PROCEDURE [dbo].[spX]\nAS\nSELECT 1");
 
             Assert.Equal(CompareStatus.Identical, CompareOne(script, server, new CompareOptions { IgnoreWhitespace = false }).Status);
+        }
+
+        [Fact]
+        public void What_sits_above_the_CREATE_is_not_a_change()
+        {
+            var repository = Proc("spX", "/* Modification history\n* 1.11.01 | Create */\nCREATE OR ALTER PROCEDURE [dbo].[spX] AS SELECT 1");
+            var goLive     = Proc("spX", "-- 06-Oct-2026 | AB | SYM0000001 | Reworded\n\n\nALTER PROCEDURE dbo.spX AS SELECT 1");
+
+            Assert.Equal(CompareStatus.Identical, CompareOne(repository, goLive).Status);
         }
 
         [Fact]

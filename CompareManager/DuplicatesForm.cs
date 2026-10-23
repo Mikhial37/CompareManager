@@ -73,7 +73,8 @@ namespace CompareManager
             _groupList.Columns.Add("Newest copy", 300);
             _groupList.SelectedIndexChanged += (s, e) => FillCopies();
 
-            _copyList.Columns.Add("Script", 520);
+            _copyList.Columns.Add("Script", 440);
+            _copyList.Columns.Add("Script date", 100);
             _copyList.Columns.Add("Changed", 150);
             _copyList.Columns.Add("Size", 80, HorizontalAlignment.Right);
             _copyList.Columns.Add("Against the newest", 200);
@@ -177,6 +178,7 @@ namespace CompareManager
                     var item = new ListViewItem(new[]
                     {
                         copy.RelativePath,
+                        copy.ScriptDate?.ToString("yyyy-MM-dd") ?? "",
                         copy.Modified?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
                         FileSize(copy.Origin),
                         against

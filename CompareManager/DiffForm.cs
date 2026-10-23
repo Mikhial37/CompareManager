@@ -113,7 +113,10 @@ namespace CompareManager
 
         private static Label SideCaption(string side, string source, SqlObject obj)
         {
-            string when = obj?.Modified is DateTime d ? $"  ·  changed {d:yyyy-MM-dd HH:mm:ss}" : "";
+            string when = obj == null ? "" :
+                (obj.ScriptDate is DateTime s ? $"  ·  script date {s:yyyy-MM-dd}" : "  ·  no script date") +
+                (obj.Modified   is DateTime m ? $"  ·  changed {m:yyyy-MM-dd HH:mm}" : "") +
+                (obj.Created    is DateTime c ? $"  ·  created {c:yyyy-MM-dd HH:mm}" : "");
             string what = obj == null ? "  ·  not here" : when;
             return new Label
             {
