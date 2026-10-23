@@ -899,6 +899,10 @@ namespace CompareManager
             protected override void OnLayout(LayoutEventArgs e)
             {
                 base.OnLayout(e);
+
+                // Setting Padding in the constructor lays the card out before the caption is
+                // made, so the first pass has none to measure.
+                if (_caption == null) return;
                 _kind.Left       = _caption.Right + 12;
                 _change.Location = new Point(Width - _change.Width - 14, (Height - _change.Height) / 2);
                 _where.Width     = Math.Max(50, _change.Left - 14 - 12);
