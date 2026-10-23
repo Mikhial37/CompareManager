@@ -36,6 +36,14 @@ namespace CompareManager.Classes
         /// </summary>
         public string Definition { get; set; } = "";
 
+        /// <summary>
+        /// For a table, its columns in the one shape both sides share (<see cref="TableStructure"/>):
+        /// built from the catalog on a server, read from the CREATE TABLE in a script. Null for
+        /// anything else, and for a script that alters a table without creating it. When both
+        /// sides have one, it is what is compared and shown, rather than the scripts' text.
+        /// </summary>
+        public string Structure { get; set; }
+
         /// <summary>When it last changed: <c>modify_date</c> on a server, the file's last write time in a folder.</summary>
         public DateTime? Modified { get; set; }
 

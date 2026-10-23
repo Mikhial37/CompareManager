@@ -41,11 +41,12 @@ namespace CompareManager
             };
 
             // A missing side is shown as nothing at all, so every line reads as removed or added.
+            // Two tables are shown as what was compared: their columns, one per line.
             _rows = result.Left == null
-                ? LineDiff.Lines(result.Right.Definition).Select((l, i) => new DiffRow { Kind = DiffKind.Added, RightNumber = i + 1, RightText = l }).ToList()
+                ? LineDiff.Lines(result.RightText).Select((l, i) => new DiffRow { Kind = DiffKind.Added, RightNumber = i + 1, RightText = l }).ToList()
                 : result.Right == null
-                    ? LineDiff.Lines(result.Left.Definition).Select((l, i) => new DiffRow { Kind = DiffKind.Removed, LeftNumber = i + 1, LeftText = l }).ToList()
-                    : LineDiff.Compare(result.Left.Definition, result.Right.Definition, key);
+                    ? LineDiff.Lines(result.LeftText).Select((l, i) => new DiffRow { Kind = DiffKind.Removed, LeftNumber = i + 1, LeftText = l }).ToList()
+                    : LineDiff.Compare(result.LeftText, result.RightText, key);
 
             Text          = $"{result.Any.DisplayName} — Compare Manager";
             Icon          = Ui.AppIcon();
@@ -57,7 +58,12 @@ namespace CompareManager
 
             // ── Header ──
             var title = Ui.Label(result.Any.DisplayName, Ui.Title);
-            var sub   = Ui.Label($"{result.Any.KindLabel}  ·  {result.StatusLabel}", Ui.Body, Ui.Muted);
+            string how = result.ByStructure
+                ? "  ·  compared by its columns — name, type, NULL, identity, default (keys and indexes are not compared). Open in WinMerge for the full scripts."
+                : result.Any.Kind == ObjectKind.Table && result.Left != null && result.Right != null
+                    ? "  ·  compared as text: one side has no CREATE TABLE to read the columns from"
+                    : "";
+            var sub   = Ui.Label($"{result.Any.KindLabel}  ·  {result.StatusLabel}{how}", Ui.Body, Ui.Muted);
 
             var previous = Ui.Secondary("▲ Previous difference");
             var next     = Ui.Secondary("▼ Next difference");

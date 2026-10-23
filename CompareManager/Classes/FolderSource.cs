@@ -87,6 +87,13 @@ namespace CompareManager.Classes
             string relative = Path.GetRelativePath(root, path);
             var    found    = ScriptParser.Identify(text);
 
+            // A script is the table only when it creates it. A repository holds the table's
+            // foreign keys, indexes and column changes in scripts of their own, each starting
+            // ALTER TABLE on it; taken as the table, any of them could stand in for its CREATE
+            // TABLE script, and every one counted as a duplicate of it. They stay scripts.
+            string structure = found?.Kind == ObjectKind.Table ? TableStructure.FromScript(text, found.Schema, found.Name) : null;
+            if (found?.Kind == ObjectKind.Table && structure == null) found = null;
+
             var entry = found == null
                 ? new SqlObject
                 {
@@ -99,7 +106,8 @@ namespace CompareManager.Classes
                     Schema     = found.Schema,
                     Name       = found.Name,
                     Kind       = found.Kind,
-                    Definition = found.Batch
+                    Definition = found.Batch,
+                    Structure  = structure
                 };
 
             entry.Modified     = modified;

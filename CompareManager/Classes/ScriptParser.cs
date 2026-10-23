@@ -42,6 +42,21 @@ namespace CompareManager.Classes
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>
+        /// What follows <c>ALTER TABLE x</c> when the statement only switches something on or
+        /// off — triggers before a data load, constraint checking — rather than changing the
+        /// table. Such a statement says nothing about what the script is for.
+        /// </summary>
+        private static readonly Regex TableToggle = new Regex(
+            @"\G\s*(?:WITH\s+(?:NO)?CHECK\s+)?(?:ENABLE|DISABLE|NOCHECK|CHECK|SET|SWITCH|REBUILD)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>A statement that changes data, and the table it changes.</summary>
+        private static readonly Regex DataPattern = new Regex(
+            @"(?<!\bON\s+)\b(?<verb>INSERT(?:\s+INTO)?|UPDATE|DELETE(?:\s+FROM)?|MERGE(?:\s+INTO)?|TRUNCATE\s+TABLE)\s+" +
+            @"(?<name>" + Qualified + @")",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>
         /// A batch separator: GO alone on its line, optionally with a count. The <c>\r?</c>
         /// matters: in multiline mode <c>$</c> stops before <c>\n</c> only, so without it no
         /// GO in a CRLF script — which is nearly all of them — would be seen.
@@ -56,13 +71,26 @@ namespace CompareManager.Classes
         /// The object a script defines: the first CREATE or ALTER of a procedure, function,
         /// view, trigger or table that is not a temp table. Null when there is none — a data
         /// script, or an empty file.
+        ///
+        /// A table is held to more than that, because data scripts touch tables all the time.
+        /// An <c>ALTER TABLE … DISABLE TRIGGER</c> before a load is not a change to the table
+        /// (<see cref="FirstDdl"/> steps over it), and a script that inserts, updates or deletes
+        /// before its first table statement is a data script that happens to alter a table on
+        /// the way — read as a table, a 500-line data move was compared with the table's script.
         /// </summary>
         public static Found Identify(string script)
         {
             if (string.IsNullOrWhiteSpace(script)) return null;
 
-            var ddl = FirstDdl(Blank(script, blankStrings: true));
+            string blanked = Blank(script, blankStrings: true);
+            var ddl = FirstDdl(blanked);
             if (ddl == null) return null;
+
+            if (KindOf(ddl.Groups["kind"].Value) == ObjectKind.Table)
+            {
+                var data = FirstData(blanked);
+                if (data != null && data.Index < ddl.Index) return null;
+            }
 
             var (schema, name) = SplitName(script.Substring(ddl.Groups["name"].Index, ddl.Groups["name"].Length));
 
@@ -75,13 +103,37 @@ namespace CompareManager.Classes
             };
         }
 
-        /// <summary>The first DDL match in already-blanked text that is not a temp object.</summary>
+        /// <summary>
+        /// The first DDL match in already-blanked text that is not a temp object, nor an
+        /// <c>ALTER TABLE</c> that only switches triggers or constraint checks on or off.
+        /// </summary>
         internal static Match FirstDdl(string blanked)
         {
             foreach (Match match in DdlPattern.Matches(blanked))
             {
                 var (_, name) = SplitName(match.Groups["name"].Value);
                 if (name.StartsWith("#") || name.StartsWith("@") || name.Length == 0) continue;
+
+                bool alterTable = match.Groups["verb"].Value.Equals("ALTER", StringComparison.OrdinalIgnoreCase) &&
+                                  KindOf(match.Groups["kind"].Value) == ObjectKind.Table;
+                if (alterTable && TableToggle.IsMatch(blanked, match.Index + match.Length)) continue;
+
+                return match;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// The first statement that changes data in a real table — not a temp table or a table
+        /// variable, not <c>UPDATE STATISTICS</c>, not a foreign key's <c>ON DELETE CASCADE</c>.
+        /// </summary>
+        internal static Match FirstData(string blanked)
+        {
+            foreach (Match match in DataPattern.Matches(blanked))
+            {
+                var (_, name) = SplitName(match.Groups["name"].Value);
+                if (name.Length == 0 || name.StartsWith("#") || name.StartsWith("@")) continue;
+                if (name.Equals("STATISTICS", StringComparison.OrdinalIgnoreCase)) continue;
                 return match;
             }
             return null;

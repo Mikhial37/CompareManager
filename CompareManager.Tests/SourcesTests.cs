@@ -84,7 +84,7 @@ namespace CompareManager.Tests
             Assert.Equal(
                 "CREATE TABLE [dbo].[Employee]\n(\n" +
                 "    [Id] int IDENTITY NOT NULL,\n" +
-                "    [Name] nvarchar(50) NULL DEFAULT (''),\n" +
+                "    [Name] nvarchar(50) NULL DEFAULT '',\n" +
                 "    [Rate] decimal(18,2) NOT NULL,\n" +
                 "    [Notes] varchar(max) NULL\n" +
                 ")",

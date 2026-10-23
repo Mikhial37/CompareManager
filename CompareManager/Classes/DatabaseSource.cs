@@ -95,8 +95,11 @@ ORDER BY c.object_id, c.column_id;";
             }
 
             foreach (var pair in objects.Where(p => p.Value.Kind == ObjectKind.Table))
+            {
                 pair.Value.Definition = TableScript(pair.Value.Schema, pair.Value.Name,
                                                     columns.TryGetValue(pair.Key, out var list) ? list : new List<string>());
+                pair.Value.Structure  = pair.Value.Definition;
+            }
 
             return objects.Values.ToList();
         }
@@ -147,14 +150,23 @@ ORDER BY c.object_id, c.column_id;";
         }
 
         public static string ColumnLine(string name, string type, short maxLength, byte precision, byte scale,
-                                        bool nullable, bool identity, string defaultSql, string computed)
-        {
-            if (computed != null) return $"[{name}] AS {computed}";
+                                        bool nullable, bool identity, string defaultSql, string computed) =>
+            ColumnLine(name, TypeName(type, maxLength, precision, scale), nullable, identity, defaultSql, computed);
 
-            var line = new StringBuilder($"[{name}] {TypeName(type, maxLength, precision, scale)}");
+        /// <summary>
+        /// One column, written the one way both sides use (<see cref="TableStructure"/> reads a
+        /// script's CREATE TABLE into this too): <c>[Name] nvarchar(50) NOT NULL DEFAULT ''</c>.
+        /// Defaults and computed expressions go through <see cref="TableStructure.Expression"/>,
+        /// so the catalog's <c>((0))</c> and a script's <c>DEFAULT 0</c> read alike.
+        /// </summary>
+        public static string ColumnLine(string name, string typeName, bool nullable, bool identity, string defaultSql, string computed)
+        {
+            if (computed != null) return $"[{name}] AS {TableStructure.Expression(computed)}";
+
+            var line = new StringBuilder($"[{name}] {typeName}");
             if (identity) line.Append(" IDENTITY");
             line.Append(nullable ? " NULL" : " NOT NULL");
-            if (defaultSql != null) line.Append(" DEFAULT ").Append(defaultSql);
+            if (defaultSql != null) line.Append(" DEFAULT ").Append(TableStructure.Expression(defaultSql));
             return line.ToString();
         }
 

@@ -46,6 +46,16 @@ namespace CompareManager.Classes
 
         public bool TextDiffers { get; set; }
 
+        /// <summary>
+        /// True when two tables were compared by their columns (<see cref="SqlObject.Structure"/>)
+        /// rather than by their scripts' text — which is whenever both sides have a structure.
+        /// </summary>
+        public bool ByStructure => Left?.Structure != null && Right?.Structure != null;
+
+        /// <summary>What was compared on each side: the table's columns when <see cref="ByStructure"/>, else the definition.</summary>
+        public string LeftText  => ByStructure ? Left.Structure  : Left?.Definition;
+        public string RightText => ByStructure ? Right.Structure : Right?.Definition;
+
         // Which of the three dates differ, of those the options asked about and both sides have.
         public bool ModifiedDiffers   { get; set; }
         public bool CreatedDiffers    { get; set; }
@@ -148,8 +158,8 @@ namespace CompareManager.Classes
             var result = new CompareResult { Key = entry.Key, Left = entry.Left, Right = entry.Right };
             if (entry.Left == null || entry.Right == null) return result;
 
-            result.TextDiffers = !string.Equals(Normalize(entry.Left.Definition, options),
-                                                Normalize(entry.Right.Definition, options),
+            result.TextDiffers = !string.Equals(Normalize(result.LeftText, options),
+                                                Normalize(result.RightText, options),
                                                 StringComparison.Ordinal);
 
             result.ModifiedDiffers   = options.CompareDates       && DatesDiffer(entry.Left.Modified, entry.Right.Modified);

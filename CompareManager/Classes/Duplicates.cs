@@ -125,7 +125,8 @@ namespace CompareManager.Classes
                                 .ThenByDescending(s => s.Modified ?? DateTime.MinValue)
                                 .ThenBy(s => s.RelativePath, PathOrder.Instance)
                                 .ToList();
-            var texts  = copies.Select(c => ObjectComparer.Normalize(c.Definition, options)).ToList();
+            // A table's copies are the same copy when their columns are, wrappers aside.
+            var texts  = copies.Select(c => ObjectComparer.Normalize(c.Structure ?? c.Definition, options)).ToList();
 
             var runOrder = copies.OrderBy(c => c.RelativePath, PathOrder.Instance).ToList();
 
