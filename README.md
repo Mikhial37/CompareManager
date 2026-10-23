@@ -11,15 +11,20 @@ on only one side.
 
 - **Two sides, any mix:** folder vs database, database vs database, or folder vs folder.
 - **Pick what to compare:** every procedure, function, view, trigger and table found on either side
-  is listed with a tick box. You can search it and filter it by type and by side. Against a database,
-  the folder's own objects start ticked.
+  is listed with a tick box. You can search it and filter it by type and by side. The left side is the
+  primary set and the right is checked against it, so the right's objects start ticked, and only what
+  differs or has changed is listed (the other kinds are counted, and can be shown).
 - **Compares the object, not how it was written:** `ALTER PROCEDURE dbo.x` in a script matches
-  `CREATE PROCEDURE [dbo].[x]` on the server. Whitespace, case and comments can each be ignored.
-  The change date is the server's `modify_date`, or the script file's last write time.
+  `CREATE PROCEDURE [dbo].[x]` on the server, and comments above the `CREATE` (Change Control
+  lines, history blocks) don't count. Whitespace, case and comments can each be ignored.
+- **Checks three dates, each on its own:** the date written in the script's header comments, the
+  last-changed date (`modify_date` or the file's last write time) and the created date
+  (`create_date` or the file's creation time).
 - **Shows the difference:** a built-in side-by-side viewer with the changed lines tinted, or
   WinMerge if it is installed. The results can be exported to CSV.
-- **Finds duplicate scripts in the folder:** objects defined by more than one script (and whether
-  those copies have drifted apart), and scripts saved twice under different names. The newest copy
+- **Finds duplicate scripts in either folder or both:** objects defined by more than one script (and whether
+  those copies have drifted apart, and which copy runs last when the folder is applied — an older one
+  running last overwrites the newer), and scripts saved twice under different names. The newest copy
   is the one compared.
 - **Read-only against servers:** it only runs `SELECT`s on `sys.objects`, `sys.sql_modules` and
   `sys.columns`.

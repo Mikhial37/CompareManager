@@ -170,8 +170,9 @@ namespace CompareManager
             row.Controls.Add(_duplicates);
             row.Controls.Add(_loadNote);
             new ToolTip().SetToolTip(_duplicates,
-                "Lists the objects the primary (left) folder defines in more than one script, and the scripts saved twice");
-            _duplicates.Click += async (s, e) => await FindDuplicatesAsync();
+                "Lists the objects a folder defines in more than one script — and which copy runs last — and the scripts saved twice. " +
+                "With two folders, pick the left, the right or both.");
+            _duplicates.Click += (s, e) => ChooseDuplicateSides();
             grid.SetColumnSpan(row, 3);
             grid.Controls.Add(row, 0, 1);
 
@@ -509,10 +510,14 @@ namespace CompareManager
 
             // Only the newest of several scripts for one object is compared, so say when
             // that happened rather than let it pass unseen.
-            int duplicated = new[] { leftTask.Result, rightTask.Result }.Sum(side => side.Count(o => o.OtherCopies.Count > 0));
-            if (duplicated > 0)
+            int leftDuplicated  = leftTask.Result.Count(o => o.OtherCopies.Count > 0);
+            int rightDuplicated = rightTask.Result.Count(o => o.OtherCopies.Count > 0);
+            if (leftDuplicated + rightDuplicated > 0)
             {
-                _loadNote.Text += $"  {duplicated:N0} object{(duplicated == 1 ? " has" : "s have")} more than one script — Find duplicate scripts lists them.";
+                var sides = new List<string>();
+                if (leftDuplicated  > 0) sides.Add($"left {leftDuplicated:N0}");
+                if (rightDuplicated > 0) sides.Add($"right {rightDuplicated:N0}");
+                _loadNote.Text += $"  Objects with more than one script: {string.Join(", ", sides)} — Find duplicate scripts lists them.";
                 _loadNote.ForeColor = Ui.DifferentFore;
             }
             else _loadNote.ForeColor = Ui.Muted;
@@ -534,44 +539,65 @@ namespace CompareManager
         // ── Duplicates ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Looks for duplicate scripts in the primary folder — the left side, or the right
-        /// when only the right is a folder. Reads the folder afresh, so it works before
-        /// anything is loaded and needs no database.
+        /// Which folders to look in. With one folder side there is nothing to ask; with two,
+        /// a menu under the button offers the left, the right or both.
         /// </summary>
-        private async Task FindDuplicatesAsync()
+        private void ChooseDuplicateSides()
         {
-            var side = _settings.Left.Kind  == SourceKind.Folder && _settings.Left.IsComplete  ? _settings.Left
-                     : _settings.Right.Kind == SourceKind.Folder && _settings.Right.IsComplete ? _settings.Right
-                     : null;
-            if (side == null)
+            bool leftIsFolder  = _settings.Left.Kind  == SourceKind.Folder && _settings.Left.IsComplete;
+            bool rightIsFolder = _settings.Right.Kind == SourceKind.Folder && _settings.Right.IsComplete;
+
+            if (!leftIsFolder && !rightIsFolder)
             {
                 MessageBox.Show(this, "Duplicates are looked for in a folder of scripts, and neither side is one. " +
-                                      "Choose a folder for the left side first.",
+                                      "Choose a folder for one of the sides first.",
                                 Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            if (leftIsFolder != rightIsFolder)
+            {
+                _ = FindDuplicatesAsync(left: leftIsFolder, right: rightIsFolder);
+                return;
+            }
 
-            string folder  = side.Folder.Trim();
-            var    options = ReadOptions();
-            SetBusy(true, "Looking for duplicate scripts in " + folder + "…");
+            var menu = new ContextMenuStrip { Font = Ui.Body };
+            menu.Items.Add($"Left folder — {_settings.Left.Folder.Trim()}",   null, async (s, e) => await FindDuplicatesAsync(left: true,  right: false));
+            menu.Items.Add($"Right folder — {_settings.Right.Folder.Trim()}", null, async (s, e) => await FindDuplicatesAsync(left: false, right: true));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Both folders", null, async (s, e) => await FindDuplicatesAsync(left: true, right: true));
+            menu.Closed += (s, e) => BeginInvoke(new Action(menu.Dispose));
+            menu.Show(_duplicates, new Point(0, _duplicates.Height));
+        }
+
+        /// <summary>
+        /// Looks for duplicate scripts in the folders asked for, reading them afresh — so it
+        /// works before anything is loaded and needs no database.
+        /// </summary>
+        private async Task FindDuplicatesAsync(bool left, bool right)
+        {
+            var sides = new List<(string Side, string Folder)>();
+            if (left)  sides.Add(("Left",  _settings.Left.Folder.Trim()));
+            if (right) sides.Add(("Right", _settings.Right.Folder.Trim()));
+
+            var options = ReadOptions();
+            SetBusy(true, "Looking for duplicate scripts in " + string.Join(" and ", sides.Select(s => s.Folder)) + "…");
 
             List<DuplicateGroup> groups;
             try
             {
-                groups = await Task.Run(() => Duplicates.Find(FolderSource.ReadAll(folder), options));
+                var found = await Task.WhenAll(sides.Select(side =>
+                    Task.Run(() => Duplicates.Find(FolderSource.ReadAll(side.Folder), options, side.Side, side.Folder))));
+                groups = found.SelectMany(g => g).ToList();
             }
             catch (Exception ex)
             {
+                SetBusy(false, "Ready");
                 MessageBox.Show(this, ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            finally
-            {
-                SetBusy(false, "Ready");
-            }
+            SetBusy(false, groups.Count == 0 ? "No duplicate scripts found." : $"{groups.Count:N0} sets of duplicate scripts found.");
 
-            _status.Text = groups.Count == 0 ? "No duplicate scripts in " + folder : $"{groups.Count} sets of duplicate scripts in {folder}";
-            using var form = new DuplicatesForm(folder, groups, options);
+            using var form = new DuplicatesForm(sides, groups, options);
             form.ShowDialog(this);
         }
 

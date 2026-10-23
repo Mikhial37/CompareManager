@@ -21,6 +21,12 @@ namespace CompareManager.Classes
     {
         public DuplicateReason Reason { get; set; }
 
+        /// <summary>"Left" or "Right" — which side's folder the copies are in.</summary>
+        public string Side { get; set; } = "";
+
+        /// <summary>The folder the copies are in.</summary>
+        public string Folder { get; set; } = "";
+
         /// <summary>The object's name, or the first file's name for a set of identical scripts.</summary>
         public string Title { get; set; } = "";
 
@@ -38,6 +44,22 @@ namespace CompareManager.Classes
 
         /// <summary>For each copy, in step with <see cref="Copies"/>: whether its text is the newest one's.</summary>
         public List<bool> SameAsNewest { get; set; } = new List<bool>();
+
+        /// <summary>
+        /// For each copy, in step with <see cref="Copies"/>: its place when the folder is run in
+        /// order (<see cref="PathOrder"/>), 1 first. In a go-live folder this is what matters —
+        /// two scripts altering one object both run, and the later one is what is left.
+        /// </summary>
+        public List<int> RunPosition { get; set; } = new List<int>();
+
+        /// <summary>The copy that runs last, and so the one that stands once the folder has been run.</summary>
+        public SqlObject RunsLast => Copies[RunPosition.IndexOf(Copies.Count)];
+
+        /// <summary>
+        /// True when the copy that runs last is not the one whose code is newest — an older
+        /// version would overwrite a newer one. Only said when the copies differ.
+        /// </summary>
+        public bool OlderRunsLast => !AllIdentical && !SameAsNewest[RunPosition.IndexOf(Copies.Count)];
 
         public SqlObject Newest => Copies[0];
 
@@ -57,7 +79,15 @@ namespace CompareManager.Classes
     /// </summary>
     public static class Duplicates
     {
-        public static List<DuplicateGroup> Find(IEnumerable<SqlObject> scripts, CompareOptions options)
+        public static List<DuplicateGroup> Find(IEnumerable<SqlObject> scripts, CompareOptions options,
+                                                string side = "", string folder = "")
+        {
+            var groups = Find(scripts, options);
+            foreach (var group in groups) { group.Side = side; group.Folder = folder; }
+            return groups;
+        }
+
+        private static List<DuplicateGroup> Find(IEnumerable<SqlObject> scripts, CompareOptions options)
         {
             options ??= new CompareOptions();
             var list   = (scripts ?? Enumerable.Empty<SqlObject>()).Where(s => s != null).ToList();
@@ -77,8 +107,10 @@ namespace CompareManager.Classes
                 groups.Add(Group(DuplicateReason.SameContent, sameText, options, s => s.Name));
             }
 
-            // The ones that have drifted apart first: those are the ones that need deciding.
-            return groups.OrderBy(g => g.AllIdentical)
+            // An older version that runs last first — it undoes a newer one — then the others
+            // that have drifted apart: those are the ones that need deciding.
+            return groups.OrderByDescending(g => g.OlderRunsLast)
+                         .ThenBy(g => g.AllIdentical)
                          .ThenBy(g => g.Reason)
                          .ThenBy(g => g.Title, StringComparer.OrdinalIgnoreCase)
                          .ToList();
@@ -87,10 +119,15 @@ namespace CompareManager.Classes
         private static DuplicateGroup Group(DuplicateReason reason, IEnumerable<SqlObject> members,
                                             CompareOptions options, Func<SqlObject, string> title)
         {
-            var copies = members.OrderByDescending(s => s.Modified ?? DateTime.MinValue)
-                                .ThenBy(s => s.RelativePath, StringComparer.OrdinalIgnoreCase)
+            // Newest by the date written in the script first — a copy's file date is only when
+            // it was copied — then by the file's own.
+            var copies = members.OrderByDescending(s => s.ScriptDate ?? DateTime.MinValue)
+                                .ThenByDescending(s => s.Modified ?? DateTime.MinValue)
+                                .ThenBy(s => s.RelativePath, PathOrder.Instance)
                                 .ToList();
             var texts  = copies.Select(c => ObjectComparer.Normalize(c.Definition, options)).ToList();
+
+            var runOrder = copies.OrderBy(c => c.RelativePath, PathOrder.Instance).ToList();
 
             return new DuplicateGroup
             {
@@ -99,7 +136,8 @@ namespace CompareManager.Classes
                 Kind         = copies[0].Kind,
                 Copies       = copies,
                 Versions     = texts.Distinct(StringComparer.Ordinal).Count(),
-                SameAsNewest = texts.Select(t => string.Equals(t, texts[0], StringComparison.Ordinal)).ToList()
+                SameAsNewest = texts.Select(t => string.Equals(t, texts[0], StringComparison.Ordinal)).ToList(),
+                RunPosition  = copies.Select(c => runOrder.IndexOf(c) + 1).ToList()
             };
         }
     }

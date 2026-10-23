@@ -90,5 +90,41 @@ namespace CompareManager.Tests
 
             Assert.Equal(new[] { "dbo.z", "dbo.a" }, groups.Select(g => g.Title));
         }
+
+        [Fact]
+        public void An_older_script_that_runs_last_is_caught_overwriting_the_newer_one()
+        {
+            // Two go-live scripts alter one function. The 06 folder runs after the 02 folder,
+            // so the one dated September undoes October's change when the folder is applied.
+            Write(@"02 - Procs\SYM0000002-0100 AB fn_X.sql",
+                  "-- 06-Oct-2026 | AB | new rule\nALTER FUNCTION dbo.fn_X() RETURNS int AS BEGIN RETURN 2 END", new DateTime(2026, 10, 6));
+            Write(@"06 - Functions\SYM0000001-0604 CD fn_X.sql",
+                  "-- 15-Sep-2026 | CD | old rule\nALTER FUNCTION dbo.fn_X() RETURNS int AS BEGIN RETURN 1 END", new DateTime(2026, 10, 7));
+
+            var group = Duplicates.Find(FolderSource.ReadAll(_folder), new CompareOptions(), "Right", _folder).Single();
+
+            Assert.Equal("Right", group.Side);
+            Assert.Equal(@"02 - Procs\SYM0000002-0100 AB fn_X.sql", group.Newest.RelativePath);
+            Assert.Equal(@"06 - Functions\SYM0000001-0604 CD fn_X.sql", group.RunsLast.RelativePath);
+            Assert.True(group.OlderRunsLast);
+        }
+
+        [Fact]
+        public void The_newest_running_last_is_not_flagged()
+        {
+            Write(@"01\a.sql", "-- 15-Sep-2026\nALTER VIEW dbo.v AS SELECT 1 AS A", DateTime.Now);
+            Write(@"02\a.sql", "-- 06-Oct-2026\nALTER VIEW dbo.v AS SELECT 2 AS A", DateTime.Now);
+
+            Assert.False(Duplicates.Find(FolderSource.ReadAll(_folder), new CompareOptions()).Single().OlderRunsLast);
+        }
+
+        [Fact]
+        public void Run_order_follows_Explorer_with_numbers_as_numbers()
+        {
+            var paths = new[] { @"10 - Data\a.sql", @"2 - Tables\b.sql", @"2 - Tables\a10.sql", @"2 - Tables\a9.sql", @"2 - Tables x\a.sql" };
+
+            Assert.Equal(new[] { @"2 - Tables\a9.sql", @"2 - Tables\a10.sql", @"2 - Tables\b.sql", @"2 - Tables x\a.sql", @"10 - Data\a.sql" },
+                         paths.OrderBy(p => p, PathOrder.Instance));
+        }
     }
 }

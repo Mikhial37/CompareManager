@@ -10,8 +10,12 @@ using System.Windows.Forms;
 namespace CompareManager
 {
     /// <summary>
-    /// The duplicate scripts in one folder: each object that more than one script defines,
-    /// and each data script saved more than once, with its copies listed underneath.
+    /// The duplicate scripts in one folder or both: each object that more than one script
+    /// defines, and each data script saved more than once, with its copies listed underneath.
+    ///
+    /// Each copy shows where it falls when the folder is run in order. In a go-live folder two
+    /// scripts that alter one object both run and the last one stands, so an older version
+    /// running after a newer one — one script overwriting another — is flagged and listed first.
     ///
     /// A copy can be compared with the newest (or two copies with each other) in the diff
     /// viewer, opened, or shown in Explorer — deciding which to keep is left to the person.
@@ -19,9 +23,9 @@ namespace CompareManager
     /// </summary>
     public sealed class DuplicatesForm : Form
     {
-        private readonly string               _folder;
         private readonly List<DuplicateGroup> _groups;
         private readonly CompareOptions       _options;
+        private readonly bool                 _bothSides;
 
         private readonly ListView _groupList = new ListView
         {
@@ -40,11 +44,11 @@ namespace CompareManager
         private readonly Button _open          = Ui.Secondary("Open");
         private readonly Button _reveal        = Ui.Secondary("Show in folder");
 
-        public DuplicatesForm(string folder, List<DuplicateGroup> groups, CompareOptions options)
+        public DuplicatesForm(IReadOnlyList<(string Side, string Folder)> sides, List<DuplicateGroup> groups, CompareOptions options)
         {
-            _folder  = folder;
-            _groups  = groups;
-            _options = options;
+            _groups    = groups;
+            _options   = options;
+            _bothSides = sides.Count > 1;
 
             Text          = "Duplicate scripts — Compare Manager";
             Icon          = Ui.AppIcon();
@@ -55,24 +59,31 @@ namespace CompareManager
             MinimumSize   = new Size(760, 480);
 
             var title = Ui.Label("Duplicate scripts", Ui.Title);
-            var where = Ui.Label(folder, Ui.Body, Ui.Muted);
-            var summary = Ui.Label(Summary(), Ui.Body, groups.Any(g => !g.AllIdentical) ? Ui.DifferentFore : Ui.Text);
-            summary.Margin = new Padding(3, 8, 3, 0);
-
             var header = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown,
                 WrapContents = false, Padding = new Padding(16, 12, 16, 10)
             };
-            header.Controls.AddRange(new Control[] { title, where, summary });
+            header.Controls.Add(title);
+            foreach (var side in sides)
+                header.Controls.Add(Ui.Label(_bothSides ? $"{side.Side}: {side.Folder}" : side.Folder, Ui.Body, Ui.Muted));
 
-            _groupList.Columns.Add("Object or script", 360);
+            foreach (var line in Summary(sides))
+            {
+                var summary = Ui.Label(line.Text, Ui.Body, line.Warn ? Ui.DifferentFore : Ui.Text);
+                summary.Margin = new Padding(3, 6, 3, 0);
+                header.Controls.Add(summary);
+            }
+
+            if (_bothSides) _groupList.Columns.Add("Side", 60);
+            _groupList.Columns.Add("Object or script", 330);
             _groupList.Columns.Add("Type", 130);
-            _groupList.Columns.Add("Copies", 70);
-            _groupList.Columns.Add("Versions", 160);
-            _groupList.Columns.Add("Newest copy", 300);
+            _groupList.Columns.Add("Copies", 60);
+            _groupList.Columns.Add("Versions", 270);
+            _groupList.Columns.Add("Runs last", 300);
             _groupList.SelectedIndexChanged += (s, e) => FillCopies();
 
+            _copyList.Columns.Add("Runs", 70);
             _copyList.Columns.Add("Script", 440);
             _copyList.Columns.Add("Script date", 100);
             _copyList.Columns.Add("Changed", 150);
@@ -87,7 +98,7 @@ namespace CompareManager
             split.Panel1.Controls.Add(_groupList);
             split.Panel1.Controls.Add(Caption("Each object defined by more than one script, and each script saved more than once"));
             split.Panel2.Controls.Add(_copyList);
-            split.Panel2.Controls.Add(Caption("Its copies — newest first; that is the one a compare uses"));
+            split.Panel2.Controls.Add(Caption("Its copies, in the order they run when the folder is applied — the last one stands. The newest (by script date, then file date) is in bold."));
             Shown += (s, e) => split.SplitterDistance = (int)(split.Height * 0.45);
 
             _compareNewest.Click += (s, e) => CompareWithNewest();
@@ -117,39 +128,58 @@ namespace CompareManager
             return label;
         }
 
-        private string Summary()
+        /// <summary>One line per side: what was found there, and whether anything overwrites a newer copy.</summary>
+        private IEnumerable<(string Text, bool Warn)> Summary(IReadOnlyList<(string Side, string Folder)> sides)
         {
-            if (_groups.Count == 0) return "No duplicates: every object is defined by one script, and no script is saved twice.";
+            foreach (var side in sides)
+            {
+                var groups   = _groups.Where(g => g.Side == side.Side).ToList();
+                string where = _bothSides ? side.Side + " folder: " : "";
 
-            int objects  = _groups.Count(g => g.Reason == DuplicateReason.SameObject);
-            int drifted  = _groups.Count(g => g.Reason == DuplicateReason.SameObject && !g.AllIdentical);
-            int sameText = _groups.Count(g => g.Reason == DuplicateReason.SameContent);
+                if (groups.Count == 0)
+                {
+                    yield return (where + "no duplicates — every object is defined by one script, and no script is saved twice.", false);
+                    continue;
+                }
 
-            var parts = new List<string>();
-            if (objects > 0)
-                parts.Add($"{objects} object{(objects == 1 ? " is" : "s are")} defined by more than one script" +
-                          (drifted > 0 ? $" — {drifted} with copies that differ" : ", all identical copies"));
-            if (sameText > 0)
-                parts.Add($"{sameText} other script{(sameText == 1 ? " is" : "s are")} saved more than once under another name");
-            return string.Join(";  ", parts) + ".";
+                int objects     = groups.Count(g => g.Reason == DuplicateReason.SameObject);
+                int drifted     = groups.Count(g => g.Reason == DuplicateReason.SameObject && !g.AllIdentical);
+                int overwritten = groups.Count(g => g.OlderRunsLast);
+                int sameText    = groups.Count(g => g.Reason == DuplicateReason.SameContent);
+
+                var parts = new List<string>();
+                if (objects > 0)
+                    parts.Add($"{objects:N0} object{(objects == 1 ? " is" : "s are")} defined by more than one script" +
+                              (drifted > 0 ? $" — {drifted:N0} with copies that differ" : ", all identical copies"));
+                if (overwritten > 0)
+                    parts.Add($"in {overwritten:N0} an older copy runs last and overwrites the newer one");
+                if (sameText > 0)
+                    parts.Add($"{sameText:N0} other script{(sameText == 1 ? " is" : "s are")} saved more than once under another name");
+
+                yield return (where + string.Join(";  ", parts) + ".", drifted > 0);
+            }
         }
+
+        private static string Ordinal(int n) =>
+            n + (n % 100 is 11 or 12 or 13 ? "th" : (n % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" });
 
         private void FillGroups()
         {
             _groupList.BeginUpdate();
             foreach (var group in _groups)
             {
-                var item = new ListViewItem(new[]
-                {
-                    group.Title,
-                    group.Reason == DuplicateReason.SameObject ? group.Newest.KindLabel : "Script (same text)",
-                    group.Copies.Count.ToString(),
-                    group.VersionsLabel,
-                    group.Newest.RelativePath
-                })
-                { Tag = group };
+                var cells = new List<string>();
+                if (_bothSides) cells.Add(group.Side);
+                cells.Add(group.Title);
+                cells.Add(group.Reason == DuplicateReason.SameObject ? group.Newest.KindLabel : "Script (same text)");
+                cells.Add(group.Copies.Count.ToString());
+                cells.Add(group.OlderRunsLast ? group.VersionsLabel + " — an older one runs last" : group.VersionsLabel);
+                cells.Add(group.RunsLast.RelativePath);
 
-                if (!group.AllIdentical) { item.BackColor = Ui.DifferentBack; item.ForeColor = Ui.DifferentFore; }
+                var item = new ListViewItem(cells.ToArray()) { Tag = group, ToolTipText = group.Folder };
+
+                if (group.OlderRunsLast)      { item.BackColor = Ui.LeftOnlyBack;  item.ForeColor = Ui.LeftOnlyFore; }
+                else if (!group.AllIdentical) { item.BackColor = Ui.DifferentBack; item.ForeColor = Ui.DifferentFore; }
                 _groupList.Items.Add(item);
             }
             _groupList.EndUpdate();
@@ -170,13 +200,16 @@ namespace CompareManager
             var group = SelectedGroup;
             if (group != null)
             {
-                for (int i = 0; i < group.Copies.Count; i++)
+                // Listed in the order they run, so one overwriting another reads top to bottom.
+                foreach (int i in Enumerable.Range(0, group.Copies.Count).OrderBy(k => group.RunPosition[k]))
                 {
                     var copy = group.Copies[i];
                     string against = i == 0 ? "Newest" : group.SameAsNewest[i] ? "Same as the newest" : "Differs from the newest";
+                    int    run     = group.RunPosition[i];
 
                     var item = new ListViewItem(new[]
                     {
+                        run == group.Copies.Count ? "Last" : Ordinal(run),
                         copy.RelativePath,
                         copy.ScriptDate?.ToString("yyyy-MM-dd") ?? "",
                         copy.Modified?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
@@ -186,6 +219,12 @@ namespace CompareManager
                     { Tag = copy, ToolTipText = copy.Origin };
 
                     if (i == 0) item.Font = Ui.Bold;
+                    if (run == group.Copies.Count && group.OlderRunsLast)
+                    {
+                        item.BackColor   = Ui.LeftOnlyBack;
+                        item.ForeColor   = Ui.LeftOnlyFore;
+                        item.ToolTipText = "Runs last but is not the newest version — it overwrites the newer copy.\n" + copy.Origin;
+                    }
                     else if (!group.SameAsNewest[i]) { item.BackColor = Ui.DifferentBack; item.ForeColor = Ui.DifferentFore; }
                     _copyList.Items.Add(item);
                 }

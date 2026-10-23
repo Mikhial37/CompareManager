@@ -55,8 +55,10 @@ namespace CompareManager.Classes
             {
                 if (byKey.TryGetValue(entry.Key, out var existing))
                 {
-                    var (newer, older) = (entry.Modified ?? DateTime.MinValue) > (existing.Modified ?? DateTime.MinValue)
-                        ? (entry, existing) : (existing, entry);
+                    // The date written in the script first, as Duplicates does: a copy's file
+                    // date is only when it was copied.
+                    static (DateTime, DateTime) Age(SqlObject o) => (o.ScriptDate ?? DateTime.MinValue, o.Modified ?? DateTime.MinValue);
+                    var (newer, older) = Age(entry).CompareTo(Age(existing)) > 0 ? (entry, existing) : (existing, entry);
 
                     newer.OtherCopies.Add(older.Origin);
                     newer.OtherCopies.AddRange(older.OtherCopies);
