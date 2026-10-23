@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ApplicationIcon>CompareManager.ico</ApplicationIcon>
+    <AssemblyTitle>Compare Manager</AssemblyTitle>
+    <Product>Compare Manager</Product>
+    <Company>Symplexity</Company>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="CompareManager.ico" />
+    <!-- Inside the assembly too, every size intact: the header and the About box draw it
+         larger than the 32px icon Windows hands back for the exe. See AppIcon. -->
+    <EmbeddedResource Include="CompareManager.ico" LogicalName="CompareManager.AppIcon.ico" />
+    <None Include="Resources\logo.png" />
+    <None Include="Tools\MakeLogo.ps1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The same client Issue Manager uses, so both talk to the servers the same way. -->
+    <PackageReference Include="System.Data.SqlClient" Version="4.8.6" />
+  </ItemGroup>
+
+</Project>
