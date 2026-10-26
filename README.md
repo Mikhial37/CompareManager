@@ -33,6 +33,12 @@ on only one side.
   failure; a transaction a failed script leaves open is rolled back. Issue Manager's SQL connections
   decide where scripts may run: a connection it marks Read only is refused, and one it doesn't know
   needs its database name typed. Every run is logged to `%LOCALAPPDATA%\CompareManager\run_logs`.
+- **Shows what has already run, and who wrote what:** each script's Change Control header
+  (`@IssueNumber`, `@ScriptName`, `@User`) is read, and its runs are looked up in the target's
+  `[Symplexity Change Control]` — how many times, when, and whether each completed, failed or never
+  finished. Scripts are counted per person, and a script without a working
+  `SYMsp_SymplexityChangeCTRL` call (start and end calls, or the one-call `@Identity = -1` form) is
+  flagged. Running a script that already completed there asks first.
 - **Comparing only reads:** the compare runs `SELECT`s on `sys.objects`, `sys.sql_modules` and
   `sys.columns`, nothing else.
 
@@ -69,6 +75,7 @@ CompareManager/
     ScriptBatches.cs             splits scripts on GO, aims their USE at the chosen database
     ScriptRunner.cs              runs or checks (NOEXEC) a folder of scripts, logs the run
     RunPermission.cs             where scripts may run, by Issue Manager's SQL connections
+    ChangeControlHistory.cs      a script's CC header, its runs in [Symplexity Change Control], scripts per person
     AppSettings.cs, Secret.cs    settings in %LOCALAPPDATA%\CompareManager, DPAPI passwords
   Tools/MakeLogo.ps1             draws the logo (CompareManager.ico, Resources/logo.png)
 CompareManager.Tests/            xUnit tests for the logic above

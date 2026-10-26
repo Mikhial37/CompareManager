@@ -32,6 +32,9 @@ namespace CompareManager
         private readonly Label    _permission = new Label { AutoSize = true, Font = Ui.Body, MaximumSize = new Size(900, 0) };
         private readonly CheckBox _aim        = new CheckBox { Text = "Aim each script at this database (its opening USE line, or a --USE [] placeholder)", AutoSize = true };
         private readonly CheckBox _stop       = new CheckBox { Text = "Stop at the first script that fails", AutoSize = true };
+        private readonly Label    _people     = new Label { AutoSize = true, Font = Ui.Body, MaximumSize = new Size(1100, 0) };
+        private readonly Label    _history    = new Label { AutoSize = true, Font = Ui.Body, ForeColor = Ui.Muted, MaximumSize = new Size(1100, 0) };
+        private int _historyRequest;
 
         private readonly ListView _list = new ListView
         {
@@ -59,7 +62,7 @@ namespace CompareManager
             Font          = Ui.Body;
             BackColor     = Ui.Background;
             StartPosition = FormStartPosition.CenterParent;
-            Size          = new Size(1200, 820);
+            Size          = new Size(1500, 880);
             MinimumSize   = new Size(860, 560);
 
             // ── Header ──
@@ -93,14 +96,21 @@ namespace CompareManager
             choices.Controls.Add(_aim);
             choices.Controls.Add(_stop);
             AddRow(grid, "", choices, null);
+            AddRow(grid, "People", _people, null);
+            AddRow(grid, "History", _history, null);
 
             // ── Scripts and their messages ──
-            _list.Columns.Add("#", 44, HorizontalAlignment.Right);
-            _list.Columns.Add("Script", 520);
-            _list.Columns.Add("Database", 260);
-            _list.Columns.Add("Status", 110);
-            _list.Columns.Add("Time", 70, HorizontalAlignment.Right);
-            _list.Columns.Add("Rows", 70, HorizontalAlignment.Right);
+            _list.Columns.Add("#", 40, HorizontalAlignment.Right);
+            _list.Columns.Add("Script", 420);
+            _list.Columns.Add("Person", 130);
+            _list.Columns.Add("Issue", 95);
+            _list.Columns.Add("Change Control", 110);
+            _list.Columns.Add("Database", 200);
+            _list.Columns.Add("Runs here", 80, HorizontalAlignment.Right);
+            _list.Columns.Add("Last run here", 210);
+            _list.Columns.Add("Status", 95);
+            _list.Columns.Add("Time", 60, HorizontalAlignment.Right);
+            _list.Columns.Add("Rows", 60, HorizontalAlignment.Right);
             _list.ItemChecked += (s, e) => { if (!_filling && e.Item.Tag is RunItem item) { item.Ticked = e.Item.Checked; UpdateStatus(); } };
             _list.SelectedIndexChanged += (s, e) => ShowMessages();
             _list.DoubleClick += (s, e) => OpenSelected();
@@ -119,10 +129,12 @@ namespace CompareManager
             var tickAll  = Ui.Secondary("Tick all");
             var tickNone = Ui.Secondary("Tick none");
             var logs     = Ui.Secondary("Open log folder");
+            var refresh  = Ui.Secondary("Refresh history");
             var close    = Ui.Secondary("Close");
             tickAll.Click  += (s, e) => TickAll(true);
             tickNone.Click += (s, e) => TickAll(false);
             logs.Click     += (s, e) => OpenLogFolder();
+            refresh.Click  += async (s, e) => await RefreshHistoryAsync();
             close.Click    += (s, e) => Close();
             _check.Click   += async (s, e) => await RunAsync(checkOnly: true);
             _run.Click     += async (s, e) => await RunAsync(checkOnly: false);
@@ -130,7 +142,7 @@ namespace CompareManager
             _stopBt.Enabled = false;
 
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(16, 8, 16, 12) };
-            buttons.Controls.AddRange(new Control[] { tickAll, tickNone, _check, _run, _stopBt, logs, close, _status });
+            buttons.Controls.AddRange(new Control[] { tickAll, tickNone, _check, _run, _stopBt, refresh, logs, close, _status });
             _status.Margin = new Padding(10, 8, 0, 0);
 
             Controls.Add(split);
@@ -218,7 +230,7 @@ namespace CompareManager
             for (int i = 0; i < _items.Count; i++)
             {
                 var item = _items[i];
-                var row = new ListViewItem(new[] { (i + 1).ToString(), item.RelativePath, "", "", "", "" })
+                var row = new ListViewItem(new[] { (i + 1).ToString(), item.RelativePath, "", "", "", "", "", "", "", "", "" })
                 { Tag = item, Checked = item.Ticked, UseItemStyleForSubItems = false };
                 _list.Items.Add(row);
                 UpdateRow(row);
@@ -226,6 +238,75 @@ namespace CompareManager
             _list.EndUpdate();
             _filling = false;
             UpdateStatus();
+            UpdatePeople();
+            _ = RefreshHistoryAsync();
+        }
+
+        /// <summary>Scripts per person, and how many of each person's lack Change Control.</summary>
+        private void UpdatePeople()
+        {
+            if (_items.Count == 0) { _people.Text = ""; return; }
+
+            var people  = People.Count(_items.Select(i => i.Header));
+            int missing = people.Sum(p => p.WithoutChangeControl);
+            _people.Text = string.Join("  ·  ", people) +
+                           (missing == 0 ? "  —  every script has Change Control" : $"  —  {missing} without Change Control (red in the list)");
+            _people.ForeColor = missing == 0 ? Ui.Text : Ui.LeftOnlyFore;
+        }
+
+        /// <summary>
+        /// Reads each script's runs on the target from [Symplexity Change Control] — off the UI
+        /// thread, and only the latest request is shown, so changing folder or database quickly
+        /// does not paint an older answer over a newer one.
+        /// </summary>
+        private async Task RefreshHistoryAsync()
+        {
+            int request = ++_historyRequest;
+            var items   = _items;
+            var target  = Target;
+
+            if (items.Count == 0 || target == null || target.Kind != SourceKind.Database || !target.IsComplete)
+            {
+                _history.Text = target == null ? "Choose a database to see which scripts have already run there." : "";
+                return;
+            }
+
+            _history.ForeColor = Ui.Muted;
+            _history.Text = $"Reading [Symplexity Change Control] on {target.Describe()}…";
+
+            bool found;
+            try
+            {
+                found = await Task.Run(() => ScriptRunner.LoadHistory(items, target));
+            }
+            catch (Exception ex)
+            {
+                if (request != _historyRequest) return;
+                _history.ForeColor = Ui.LeftOnlyFore;
+                _history.Text = "Could not read the run history: " + ex.Message;
+                return;
+            }
+            if (request != _historyRequest || IsDisposed) return;
+
+            if (!found)
+            {
+                _history.ForeColor = Ui.DifferentFore;
+                _history.Text = $"{target.Database} has no [Symplexity Change Control] table, so there is no run history to show.";
+            }
+            else
+            {
+                int ran       = items.Count(i => i.History?.Count > 0);
+                int completed = items.Count(i => i.LastRun?.Outcome == "completed");
+                int bad       = items.Count(i => i.LastRun != null && i.LastRun.Outcome != "completed");
+                _history.ForeColor = ran == 0 ? Ui.Muted : Ui.Text;
+                _history.Text = ran == 0
+                    ? $"None of these scripts has run on {target.Database} (per [Symplexity Change Control])."
+                    : $"{ran} of {items.Count} scripts have run on {target.Database} before — {completed} last completed" +
+                      (bad > 0 ? $", {bad} last failed or never finished" : "") + ". Select one to see every run.";
+            }
+
+            foreach (ListViewItem row in _list.Items) UpdateRow(row);
+            ShowMessages();
         }
 
         /// <summary>
@@ -262,12 +343,23 @@ namespace CompareManager
 
         private void UpdateRow(ListViewItem row)
         {
-            var item = (RunItem)row.Tag;
-            row.SubItems[2].Text = DatabaseText(item, out bool warn);
-            row.SubItems[2].ForeColor = warn ? Ui.LeftOnlyFore : Ui.Text;
-            row.SubItems[3].Text = item.StateLabel;
-            row.SubItems[4].Text = item.State is RunState.Waiting or RunState.Running ? "" : $"{item.Duration.TotalSeconds:0.0}s";
-            row.SubItems[5].Text = item.Rows > 0 ? item.Rows.ToString("N0") : "";
+            var item   = (RunItem)row.Tag;
+            var header = item.Header;
+            var last   = item.LastRun;
+
+            row.SubItems[2].Text = header?.Person ?? "";
+            row.SubItems[3].Text = header?.Issue ?? "none";
+            row.SubItems[3].ForeColor = header?.Issue == null ? Ui.LeftOnlyFore : Ui.Text;
+            row.SubItems[4].Text = header?.ChangeControlLabel ?? "";
+            row.SubItems[4].ForeColor = header?.HasChangeControl == true ? Ui.Text : Ui.LeftOnlyFore;
+            row.SubItems[5].Text = DatabaseText(item, out bool warn);
+            row.SubItems[5].ForeColor = warn ? Ui.LeftOnlyFore : Ui.Text;
+            row.SubItems[6].Text = item.History == null ? "" : ChangeControlHistory.Summary(item.History) is var s && s.Length > 0 ? s : "never";
+            row.SubItems[7].Text = last == null ? "" : $"{last.Started:yyyy-MM-dd HH:mm} {last.Outcome}";
+            row.SubItems[7].ForeColor = last == null || last.Outcome == "completed" ? Ui.Text : Ui.LeftOnlyFore;
+            row.SubItems[8].Text = item.StateLabel;
+            row.SubItems[9].Text = item.State is RunState.Waiting or RunState.Running ? "" : $"{item.Duration.TotalSeconds:0.0}s";
+            row.SubItems[10].Text = item.Rows > 0 ? item.Rows.ToString("N0") : "";
             row.ToolTipText = item.Path;
 
             Color back = item.State switch
@@ -304,8 +396,28 @@ namespace CompareManager
 
             string[] messages;
             lock (item.Messages) messages = item.Messages.ToArray();
-            _messages.Text = item.Path + Environment.NewLine + Environment.NewLine +
-                             (messages.Length == 0 ? "(no messages)" : string.Join(Environment.NewLine, messages));
+
+            var text = new System.Text.StringBuilder();
+            text.AppendLine(item.Path);
+            var h = item.Header;
+            if (h != null)
+                text.AppendLine($"Issue {h.Issue ?? "(none)"}  ·  script name {h.ScriptName}  ·  by {h.Person ?? "(nobody named)"}  ·  Change Control: {h.ChangeControlLabel}");
+
+            text.AppendLine();
+            if (item.History == null)
+                text.AppendLine("Run history: not read (choose a database, or it has no [Symplexity Change Control]).");
+            else if (item.History.Count == 0)
+                text.AppendLine($"Run history on {Target?.Database}: never run.");
+            else
+            {
+                text.AppendLine($"Run history on {Target?.Database}: {item.History.Count} run{(item.History.Count == 1 ? "" : "s")}");
+                foreach (var run in item.History) text.AppendLine("  " + run);
+            }
+
+            text.AppendLine();
+            text.AppendLine(messages.Length == 0 ? "(no messages from this session)" : "Messages from this session:");
+            foreach (string message in messages) text.AppendLine("  " + message);
+            _messages.Text = text.ToString();
         }
 
         private void OpenSelected()
@@ -383,6 +495,15 @@ namespace CompareManager
                 if (!_aim.Checked)
                     warnings.Add("Opening USE lines are not being aimed at the chosen database.");
 
+                int alreadyRan = ticked.Count(i => i.LastRun?.Outcome == "completed");
+                if (alreadyRan > 0)
+                    warnings.Add($"{alreadyRan} of them have already run on {Target.Database} and completed (per [Symplexity Change Control]) — " +
+                                 "they will run again. Untick them unless that is the point.");
+
+                int noControl = ticked.Count(i => i.Header?.HasChangeControl != true);
+                if (noControl > 0)
+                    warnings.Add($"{noControl} of them have no working Change Control call, so their run will not be recorded in [Symplexity Change Control].");
+
                 if (!ConfirmRunForm.Confirm(this, Target, ticked.Count, kind == RunPermissionKind.ConfirmByTyping, warnings))
                     return;
             }
@@ -423,6 +544,9 @@ namespace CompareManager
 
             var firstFailed = _list.Items.Cast<ListViewItem>().FirstOrDefault(r => ((RunItem)r.Tag).State == RunState.Failed);
             if (firstFailed != null) { firstFailed.Selected = true; firstFailed.EnsureVisible(); }
+
+            // A real run writes to [Symplexity Change Control]; show what it recorded.
+            if (!checkOnly) await RefreshHistoryAsync();
         }
 
         private void SetRunning(bool running, bool checkOnly)

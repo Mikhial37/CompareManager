@@ -36,6 +36,17 @@ namespace CompareManager.Classes
         /// <summary>The script as it will be sent — aimed, split — read when the list is built and again just before it runs.</summary>
         public PreparedScript Prepared { get; set; }
 
+        /// <summary>Its Change Control header: issue, script name, person, and whether it records its run.</summary>
+        public ChangeControlHeader Header { get; set; }
+
+        /// <summary>
+        /// Its runs on the target, from <c>[Symplexity Change Control]</c>, oldest first. Null
+        /// until looked up — or when the target has no such table.
+        /// </summary>
+        public List<ChangeControlRun> History { get; set; }
+
+        public ChangeControlRun LastRun => History?.LastOrDefault();
+
         public string StateLabel => State switch
         {
             RunState.Waiting   => "",
@@ -98,15 +109,32 @@ namespace CompareManager.Classes
             return Directory.EnumerateFiles(folder, "*.sql", SearchOption.AllDirectories)
                 .Select(path => new RunItem { Path = path, RelativePath = System.IO.Path.GetRelativePath(folder, path) })
                 .OrderBy(item => item.RelativePath, PathOrder.Instance)
-                .Select(item => { item.Prepared = TryPrepare(item.Path, aimAt); return item; })
+                .Select(item => { Read(item, aimAt); return item; })
                 .ToList();
         }
 
-        private static PreparedScript TryPrepare(string path, string aimAt)
+        /// <summary>Reads a script once for both what will be sent and its Change Control header.</summary>
+        private static void Read(RunItem item, string aimAt)
         {
-            try { return ScriptBatches.Prepare(File.ReadAllText(path), aimAt); }
-            catch (IOException)                 { return null; }
-            catch (UnauthorizedAccessException) { return null; }
+            try
+            {
+                string text   = File.ReadAllText(item.Path);
+                item.Prepared = ScriptBatches.Prepare(text, aimAt);
+                item.Header   = ChangeControlHeader.Read(text, System.IO.Path.GetFileName(item.Path));
+            }
+            catch (IOException)                 { item.Prepared = null; }
+            catch (UnauthorizedAccessException) { item.Prepared = null; }
+        }
+
+        /// <summary>
+        /// Fills in each script's runs on the target from <c>[Symplexity Change Control]</c>.
+        /// Returns false when the database has no such table. Blocks; call it off the UI thread.
+        /// </summary>
+        public static bool LoadHistory(IReadOnlyList<RunItem> items, CompareSource target)
+        {
+            var runs = ChangeControlHistory.Load(target, items.Select(i => i.Header?.Issue));
+            foreach (var item in items) item.History = runs == null ? null : ChangeControlHistory.For(item.Header, runs);
+            return runs != null;
         }
 
         /// <summary>
