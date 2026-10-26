@@ -11,8 +11,9 @@ on only one side.
 
 - **Two sides, any mix:** folder vs database, database vs database, or folder vs folder.
 - **Pick what to compare:** every procedure, function, view, trigger and table found on either side
-  is listed with a tick box. You can search it and filter it by type and by side. The left side is the
-  primary set and the right is checked against it, so the right's objects start ticked, and only what
+  is listed with a tick box. You can search it and filter it by type and by side. The smaller side is
+  the one being checked and the other the reference, whichever way round they are: its objects start
+  ticked and are the ones listed, and only what
   differs or has changed is listed (the other kinds are counted, and can be shown).
 - **Compares the object, not how it was written:** `ALTER PROCEDURE dbo.x` in a script matches
   `CREATE PROCEDURE [dbo].[x]` on the server, and comments above the `CREATE` (Change Control

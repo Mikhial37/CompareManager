@@ -33,8 +33,8 @@ namespace CompareManager
         private bool _filling;
 
         // ── Sources ──
-        private readonly SourceCard _leftCard  = new SourceCard("LEFT · PRIMARY, EVERY OBJECT");
-        private readonly SourceCard _rightCard = new SourceCard("RIGHT · CHECKED AGAINST THE LEFT");
+        private readonly SourceCard _leftCard  = new SourceCard("LEFT");
+        private readonly SourceCard _rightCard = new SourceCard("RIGHT");
         private readonly Button     _load      = Ui.Primary("Load objects");
         private readonly Button     _duplicates = Ui.Secondary("Find duplicate scripts");
         private readonly Button     _runScripts = Ui.Secondary("Run scripts…");
@@ -194,7 +194,7 @@ namespace CompareManager
 
             _kindFilter.Items.AddRange(new object[] { "All types", "Stored procedures", "Functions", "Views", "Triggers", "Tables", "Other scripts" });
             _kindFilter.SelectedIndex = 0;
-            _whereFilter.Items.AddRange(new object[] { "Either side", "Both sides", "Left only", "Right only" });
+            _whereFilter.Items.AddRange(new object[] { "Either side", "Left side", "Right side", "Both sides", "Left only", "Right only" });
             _whereFilter.SelectedIndex = 0;
 
             var filters = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 0, 0, 6) };
@@ -236,7 +236,7 @@ namespace CompareManager
             debounce.Tick += (s, e) => { debounce.Stop(); FillObjects(); };
             _search.TextChanged += (s, e) => { debounce.Stop(); debounce.Start(); };
             _kindFilter.SelectedIndexChanged  += (s, e) => FillObjects();
-            _whereFilter.SelectedIndexChanged += (s, e) => FillObjects();
+            _whereFilter.SelectedIndexChanged += (s, e) => { if (!_filling) FillObjects(); };
 
             pane.Controls.Add(_objects);
             pane.Controls.Add(filters);
@@ -448,6 +448,15 @@ namespace CompareManager
             (_settings.Left, _settings.Right) = (_settings.Right, _settings.Left);
             foreach (var entry in _catalog) (entry.Left, entry.Right) = (entry.Right, entry.Left);
             foreach (var result in _results) (result.Left, result.Right) = (result.Right, result.Left);
+
+            // The side being checked moves with its objects; so does a side filter.
+            string leftRole = _leftCard.Role;
+            _leftCard.SetRole(_rightCard.Role);
+            _rightCard.SetRole(leftRole);
+            _filling = true;
+            _whereFilter.SelectedIndex = _whereFilter.SelectedIndex switch { 1 => 2, 2 => 1, 4 => 5, 5 => 4, var same => same };
+            _filling = false;
+
             SaveSettings();
             ShowSources();
             FillObjects();
@@ -459,6 +468,11 @@ namespace CompareManager
             _catalog = new List<CatalogEntry>();
             _results = new List<CompareResult>();
             _ticked.Clear();
+            _leftCard.SetRole(null);
+            _rightCard.SetRole(null);
+            _filling = true;
+            _whereFilter.SelectedIndex = 0;
+            _filling = false;
             FillObjects();
             FillResults();
             _loadNote.Text = note;
@@ -502,14 +516,30 @@ namespace CompareManager
             _results = new List<CompareResult>();
             _ticked.Clear();
 
-            // The left is the primary set — everything — and the right is what is checked
-            // against it, so the right side's objects start ticked. Comparing all 27,000 of the
-            // left's would only bury the answer under objects the right never had.
-            Func<CatalogEntry, bool> startTicked = rightTask.Result.Count > 0 ? e => e.Right != null : e => true;
+            // The smaller side is the one being checked, wherever it is (CompareScope): its
+            // objects start ticked and the list shows just them. "Either side" shows the rest.
+            var scope = CompareScope.For(leftTask.Result.Count, rightTask.Result.Count);
+            Func<CatalogEntry, bool> startTicked = scope switch
+            {
+                CheckedSide.Left  => e => e.Left  != null,
+                CheckedSide.Right => e => e.Right != null,
+                _                 => e => true
+            };
             foreach (var entry in _catalog.Where(startTicked)) _ticked.Add(entry.Key);
 
-            _loadNote.Text = $"{leftTask.Result.Count:N0} on the left, {rightTask.Result.Count:N0} on the right, " +
-                             $"{_catalog.Count(e => e.Left != null && e.Right != null):N0} on both — read in {watch.Elapsed.TotalSeconds:0.0}s.";
+            _filling = true;
+            _whereFilter.SelectedIndex = scope switch { CheckedSide.Left => 1, CheckedSide.Right => 2, _ => 0 };
+            _filling = false;
+            _leftCard.SetRole(scope switch  { CheckedSide.Left  => "BEING CHECKED", CheckedSide.Right => "REFERENCE", _ => null });
+            _rightCard.SetRole(scope switch { CheckedSide.Right => "BEING CHECKED", CheckedSide.Left  => "REFERENCE", _ => null });
+
+            int both = _catalog.Count(e => e.Left != null && e.Right != null);
+            _loadNote.Text = scope switch
+            {
+                CheckedSide.Left  => $"Checking the left's {leftTask.Result.Count:N0} against the right's {rightTask.Result.Count:N0} — {both:N0} found on both.",
+                CheckedSide.Right => $"Checking the right's {rightTask.Result.Count:N0} against the left's {leftTask.Result.Count:N0} — {both:N0} found on both.",
+                _                 => $"{leftTask.Result.Count:N0} on the left, {rightTask.Result.Count:N0} on the right, {both:N0} on both."
+            } + $" Read in {watch.Elapsed.TotalSeconds:0.0}s.";
             _status.Text = "Loaded. Tick the objects to compare, then Compare ticked.";
 
             // Only the newest of several scripts for one object is compared, so say when
@@ -648,9 +678,11 @@ namespace CompareManager
                 (kind == null || e.Any.Kind == kind) &&
                 (_whereFilter.SelectedIndex switch
                 {
-                    1 => e.Left != null && e.Right != null,
-                    2 => e.Right == null,
-                    3 => e.Left == null,
+                    1 => e.Left  != null,
+                    2 => e.Right != null,
+                    3 => e.Left != null && e.Right != null,
+                    4 => e.Right == null,
+                    5 => e.Left  == null,
                     _ => true
                 }) &&
                 (search.Length == 0 || e.Any.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase)));
@@ -930,6 +962,7 @@ namespace CompareManager
                 Cursor    = Cursors.Hand;
                 Margin    = new Padding(0);
 
+                _side    = side;
                 _caption = Ui.Label(side, Ui.Caption, Ui.Muted);
                 _caption.Location = new Point(14, 10);
                 _kind.Location    = new Point(64, 10);
@@ -947,7 +980,19 @@ namespace CompareManager
                     c.Click += (s, e) => Choose?.Invoke(this, EventArgs.Empty);
             }
 
-            private readonly Label _caption;
+            private readonly Label  _caption;
+            private readonly string _side;
+
+            /// <summary>"BEING CHECKED" or "REFERENCE" once both sides are loaded; null before.</summary>
+            public string Role { get; private set; }
+
+            public void SetRole(string role)
+            {
+                Role = role;
+                _caption.Text      = role == null ? _side : $"{_side} · {role}";
+                _caption.ForeColor = role == "BEING CHECKED" ? Ui.Accent : Ui.Muted;
+                PerformLayout();
+            }
 
             protected override void OnLayout(LayoutEventArgs e)
             {
