@@ -49,7 +49,7 @@ namespace CompareManager.Classes
         /// <summary>
         /// Who the script is by: <c>SET @User = '…'</c>, which the procedure records as Person
         /// Responsible; failing that, the initials after the number in the file name
-        /// (<c>SYM0184802-0725 PK sp_….sql</c>). Null when neither says.
+        /// (<c>SYM0000002-0725 AB sp_….sql</c>). Null when neither says.
         /// </summary>
         public string Person { get; set; }
 
@@ -90,7 +90,7 @@ namespace CompareManager.Classes
         private static readonly Regex UserValue   = Value("User");
         private static readonly Regex IssueInName = new Regex(@"\bSYM\d{5,}", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        /// <summary>The initials after the number: <c>SYM0184802-0725 PK …</c>, <c>SYM0184778 401 AW …</c>.</summary>
+        /// <summary>The initials after the number: <c>SYM0000002-0725 AB …</c>, <c>SYM0000003 401 CD …</c>.</summary>
         private static readonly Regex InitialsInName = new Regex(
             @"^SYM\d{5,}(?:[-\s]+\d+)?\s+(?<who>[A-Z]{2,4})\s", RegexOptions.Compiled);
 
