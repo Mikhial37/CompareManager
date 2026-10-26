@@ -26,8 +26,15 @@ on only one side.
   those copies have drifted apart, and which copy runs last when the folder is applied — an older one
   running last overwrites the newer), and scripts saved twice under different names. The newest copy
   is the one compared.
-- **Read-only against servers:** it only runs `SELECT`s on `sys.objects`, `sys.sql_modules` and
-  `sys.columns`.
+- **Runs a folder's scripts on a database (Run scripts…):** every `.sql` below the folder, in the
+  order Explorer lists them, each aimed at the chosen database (its opening `USE` line, or a
+  `--USE []` placeholder, as Issue Manager's publish does). **Check scripts** compiles them all with
+  `SET NOEXEC ON` and runs nothing. **Run ticked scripts** applies them, stopping at the first
+  failure; a transaction a failed script leaves open is rolled back. Issue Manager's SQL connections
+  decide where scripts may run: a connection it marks Read only is refused, and one it doesn't know
+  needs its database name typed. Every run is logged to `%LOCALAPPDATA%\CompareManager\run_logs`.
+- **Comparing only reads:** the compare runs `SELECT`s on `sys.objects`, `sys.sql_modules` and
+  `sys.columns`, nothing else.
 
 Saved passwords are encrypted with Windows DPAPI for the current user. If
 [Issue Manager](#issue-manager) is installed, its saved SQL connections are offered in the
@@ -51,6 +58,7 @@ CompareManager/
   SourceForm.cs                  picks a side (folder, or server + login + database)
   DiffForm.cs                    side-by-side diff of one object
   DuplicatesForm.cs              duplicate scripts in a folder
+  ScriptRunnerForm.cs            Run scripts: pick a folder and a database, check, run
   Classes/
     ScriptParser.cs              which object a script defines; the batch that defines it
     FolderSource.cs              reads a folder of .sql files
@@ -58,6 +66,9 @@ CompareManager/
     ObjectComparer.cs            pairs both sides up and decides what differs
     Duplicates.cs                groups duplicate scripts
     LineDiff.cs                  Myers line diff for the viewer
+    ScriptBatches.cs             splits scripts on GO, aims their USE at the chosen database
+    ScriptRunner.cs              runs or checks (NOEXEC) a folder of scripts, logs the run
+    RunPermission.cs             where scripts may run, by Issue Manager's SQL connections
     AppSettings.cs, Secret.cs    settings in %LOCALAPPDATA%\CompareManager, DPAPI passwords
   Tools/MakeLogo.ps1             draws the logo (CompareManager.ico, Resources/logo.png)
 CompareManager.Tests/            xUnit tests for the logic above

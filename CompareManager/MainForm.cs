@@ -37,6 +37,7 @@ namespace CompareManager
         private readonly SourceCard _rightCard = new SourceCard("RIGHT · CHECKED AGAINST THE LEFT");
         private readonly Button     _load      = Ui.Primary("Load objects");
         private readonly Button     _duplicates = Ui.Secondary("Find duplicate scripts");
+        private readonly Button     _runScripts = Ui.Secondary("Run scripts…");
         private readonly Label      _loadNote  = Ui.Label("", Ui.Body, Ui.Muted);
 
         // ── Objects ──
@@ -168,6 +169,9 @@ namespace CompareManager
             _loadNote.Margin = new Padding(10, 8, 0, 0);
             row.Controls.Add(_load);
             row.Controls.Add(_duplicates);
+            row.Controls.Add(_runScripts);
+            new ToolTip().SetToolTip(_runScripts, "Apply a folder's scripts to a SQL Server database — check them first, then run");
+            _runScripts.Click += (s, e) => OpenScriptRunner();
             row.Controls.Add(_loadNote);
             new ToolTip().SetToolTip(_duplicates,
                 "Lists the objects a folder defines in more than one script — and which copy runs last — and the scripts saved twice. " +
@@ -534,6 +538,29 @@ namespace CompareManager
             _compare.Enabled    = !busy;
             _leftCard.Enabled   = _rightCard.Enabled = !busy;
             _status.Text        = status;
+        }
+
+        // ── Running scripts ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Opens the script runner. The right side is the folder being checked against the
+        /// left — a go-live folder — so a folder there is the one suggested to run, and a
+        /// database on either side the one to run it on; otherwise the runner's own last choices.
+        /// </summary>
+        private void OpenScriptRunner()
+        {
+            string folder = _settings.Right.Kind == SourceKind.Folder && _settings.Right.IsComplete ? _settings.Right.Folder.Trim()
+                          : _settings.Left.Kind  == SourceKind.Folder && _settings.Left.IsComplete  ? _settings.Left.Folder.Trim()
+                          : null;
+            if (!string.IsNullOrWhiteSpace(_settings.RunnerFolder)) folder = _settings.RunnerFolder;
+
+            var target = _settings.RunnerTarget
+                      ?? (_settings.Right.Kind == SourceKind.Database && _settings.Right.IsComplete ? _settings.Right
+                        : _settings.Left.Kind  == SourceKind.Database && _settings.Left.IsComplete  ? _settings.Left
+                        : null);
+
+            using var form = new ScriptRunnerForm(_settings, folder, target?.Clone());
+            form.ShowDialog(this);
         }
 
         // ── Duplicates ────────────────────────────────────────────────────────

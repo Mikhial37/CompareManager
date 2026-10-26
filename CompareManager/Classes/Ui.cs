@@ -44,6 +44,18 @@ namespace CompareManager.Classes
         /// <summary>A plain outlined button for everything else.</summary>
         public static Button Secondary(string text) => Style(new Button { Text = text }, primary: false);
 
+        public static readonly Color Danger = Color.FromArgb(220, 38, 38);
+
+        /// <summary>The red button for the one thing that changes a database.</summary>
+        public static Button Destructive(string text)
+        {
+            var button = Style(new Button { Text = text }, primary: true);
+            button.BackColor = Danger;
+            button.FlatAppearance.BorderColor = Danger;
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(185, 28, 28);
+            return button;
+        }
+
         public static Button Style(Button button, bool primary)
         {
             button.FlatStyle = FlatStyle.Flat;

@@ -25,6 +25,12 @@ namespace CompareManager.Classes
         public bool ShowOnlyRight   { get; set; }
         public bool ShowIdentical   { get; set; }
 
+        // The script runner: the folder and database it last ran on, and its two choices.
+        public string        RunnerFolder      { get; set; } = "";
+        public CompareSource RunnerTarget      { get; set; }
+        public bool          RunnerAim         { get; set; } = true;
+        public bool          RunnerStopOnError { get; set; } = true;
+
         /// <summary>Folders picked lately, newest first — offered by the folder picker.</summary>
         public List<string> RecentFolders { get; set; } = new List<string>();
 

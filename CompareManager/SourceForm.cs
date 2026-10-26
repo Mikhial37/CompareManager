@@ -36,7 +36,7 @@ namespace CompareManager
         /// <summary>The side as chosen; set when the window closes with OK.</summary>
         public CompareSource Source { get; private set; }
 
-        public SourceForm(string sideName, CompareSource current, AppSettings settings)
+        public SourceForm(string sideName, CompareSource current, AppSettings settings, bool databaseOnly = false)
         {
             _settings = settings;
 
@@ -84,6 +84,15 @@ namespace CompareManager
             _databaseChoice.CheckedChanged += (s, e) => ShowKind();
 
             Fill(current ?? new CompareSource());
+
+            if (databaseOnly)
+            {
+                // Scripts are run on a database; a folder is no answer to "where?".
+                Text = "Choose the database to run scripts on";
+                heading.Text = "RUN SCRIPTS ON";
+                choices.Visible = false;
+                _databaseChoice.Checked = true;
+            }
         }
 
         // ── Layout ────────────────────────────────────────────────────────────

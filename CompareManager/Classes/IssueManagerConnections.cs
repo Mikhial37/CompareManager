@@ -25,6 +25,15 @@ namespace CompareManager.Classes
             public string Login          { get; set; } = "";
             public string PasswordStored { get; set; } = "";
 
+            /// <summary>Whether Issue Manager lets scripts run on this connection — its "Can run" tick. Live servers are not.</summary>
+            public bool RunScripts { get; set; }
+
+            public bool IsDevServer { get; set; }
+
+            public bool SameAs(string server, string database) =>
+                string.Equals(Server?.Trim(), server?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Database?.Trim(), database?.Trim(), StringComparison.OrdinalIgnoreCase);
+
             /// <summary>"Payroll Dev — SQLDEV01 · Payroll", or without the name when it has none.</summary>
             public override string ToString()
             {
